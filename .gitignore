@@ -1,0 +1,16 @@
+__pycache__/
+*.egg-info/
+.venv/
+.pytest_cache/
+.ruff_cache/
+# Datos locales (zips reales en data/samples/, lake local en data/lake/): nunca se suben
+data/
+*.zip
+.env
+# Guías locales para asistentes de IA: se conservan en disco, no se publican
+CLAUDE.md
+PLAN.md
+# Terraform: el estado y la caché de proveedores no se versionan
+.terraform/
+*.tfstate
+*.tfstate.*

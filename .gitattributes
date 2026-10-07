@@ -1,0 +1,3 @@
+# Los fixtures son líneas copiadas byte a byte de los CSV del INEGI (UTF-8, CRLF).
+# Sin conversión de fin de línea, para que sean idénticos en Windows y en CI.
+tests/fixtures/** -text

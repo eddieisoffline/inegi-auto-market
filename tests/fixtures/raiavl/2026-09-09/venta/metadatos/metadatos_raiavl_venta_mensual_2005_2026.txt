@@ -1,0 +1,31 @@
+
+identifier: 
+
+title: Registro Administrativo de la Industria Automotriz de Vehículos Ligeros. Venta de vehículos 2005-2026. Información mensual, cifras revisadas al mes de Agosto.
+
+description: El Registro Administrativo de la Industria Automotriz de Vehículos Ligeros (RAIAVL), es un proyecto que presenta información de la venta de vehículos ligeros en el territorio nacional, identificando tipo y segmento del vehículo. Para ello las empresas adscritas a la Asociación Mexicana de la Industria Automotriz (AMIA) entrega sus datos de manera mensual. 
+Cobertura geográfica: Nacional.
+
+nota: La información del Avance de ventas de vehículos ligeros se publica con carácter de preliminar. Para el caso del Reporte del Registro de Vehículos Ligeros las cifras de Ventas desglosadas por modelo tienen el carácter de revisadas, mientras que las cifras de Producción y Exportación se publican con carácter de preliminar en el mes que se difunden por primera vez y cambian de estatus en la siguiente publicación mensual del Reporte del Registro de Vehículos Ligeros. Cabe señalar que el estatus de cifras revisadas se mantiene durante un periodo de tres años y el cambio a cifras definitivas se realiza en febrero de cada año.
+
+modified: 2026-09-09
+
+publisher: Instituto Nacional de Estadística y Geografía, INEGI
+
+mbox: atencion.usuarios@inegi.org.mx
+
+license: https://www.inegi.org.mx/inegi/terminos.html
+
+dataDictionary: 
+
+keyword: "automóviles", "camiones ligeros", "compacto", "subcompacto", "de lujo", "deportivo", "minivan", "suv´s", "pick up", "venta de vehículos"
+
+contactPoint: Mtro. J. Armando Aguiar Rodríguez, 800 111 4634
+
+temporal: 2005-01-01-2026-08-31
+
+spatial: Estados Unidos Mexicanos
+
+accrualPeriodicity: Mensualmente
+
+distribution: https://www.inegi.org.mx/datosprimarios/iavl/
