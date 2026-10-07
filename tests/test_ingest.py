@@ -1,6 +1,7 @@
 import hashlib
 import json
 import logging
+import re
 import zipfile
 from datetime import date, datetime, timezone
 
@@ -23,6 +24,7 @@ NOW = datetime(2026, 10, 7, 18, 30, tzinfo=timezone.utc)
 VENTA_META = "metadatos/metadatos_raiavl_venta_mensual_2005_2026.txt"
 VENTA_PARTITION = "raw/raiavl/venta/publication_date=2026-10-07/"
 VENTA_ZIP = VENTA_PARTITION + "conjunto_de_datos_raiavl_mensual_venta_csv.zip"
+VENTA_2026 = "conjunto_de_datos/raiavl_venta_mensual_tr_cifra_2026.csv"
 
 
 def fixed_now():
@@ -51,6 +53,20 @@ class MemoryStorage:
 
 def snapshot_zip(snapshot="2026-10-07", product="venta", compression=zipfile.ZIP_STORED):
     return build_zip(fixture_dir(snapshot, product), compression)
+
+
+def repackaged_zip():
+    """Mismos archivos de venta 2026-10-07 con otro empaquetado, como el cambio de la fuente
+    entre fotos: Deflated en vez de Stored, otro orden y con entrada de carpeta."""
+    files = fixture_files()
+    return make_zip({"metadatos/": b"", **dict(reversed(files.items()))}, zipfile.ZIP_DEFLATED)
+
+
+def revised_zip():
+    """Revisión silenciosa: cambia un valor del CSV de 2026 sin cambiar 'modified'."""
+    files = fixture_files()
+    files[VENTA_2026] = files[VENTA_2026].replace(b'"iX3",', b'"iX3 ",', 1)
+    return make_zip(files)
 
 
 def with_metadata(text_change):
@@ -181,6 +197,10 @@ def test_ingest_writes_zip_metadata_and_manifest(tmp_path, compression):
         "original_name": "venta.zip",
         "zip_name": "conjunto_de_datos_raiavl_mensual_venta_csv.zip",
         "metadata_name": "metadatos_raiavl_venta_mensual_2005_2026.txt",
+        "files_sha256": {
+            name: hashlib.sha256(content).hexdigest()
+            for name, content in sorted(fixture_files().items())
+        },
     }
 
 
@@ -202,26 +222,47 @@ def test_ingesting_twice_writes_nothing_the_second_time():
     assert storage.writes == writes
 
 
-def _revised_value(files):
-    name = "conjunto_de_datos/raiavl_venta_mensual_tr_cifra_2026.csv"
-    files[name] = files[name].replace(b'"iX3","Camiones ligeros"', b'"iX3 ","Camiones ligeros"', 1)
-    return make_zip(files)
+def test_same_content_with_other_packaging_writes_nothing(caplog):
+    storage = MemoryStorage()
+    first = ingest_zip(snapshot_zip(), "venta.zip", storage)
+    before = dict(storage.files)
+    result = ingest_zip(repackaged_zip(), "venta.zip", storage)
+    assert result.status == "same_content"
+    assert result.sha256 != first.sha256
+    assert storage.files == before
+    assert any("mismo contenido con otro empaquetado" in m for m in caplog.messages)
 
 
-@pytest.mark.parametrize(
-    "other",
-    [
-        pytest.param(lambda: snapshot_zip(compression=zipfile.ZIP_DEFLATED), id="reempaquetado"),
-        pytest.param(lambda: _revised_value(fixture_files()), id="contenido-distinto"),
-    ],
-)
-def test_same_date_with_other_content_is_never_overwritten(other):
+def test_silent_revision_is_never_overwritten_and_names_the_changed_file():
     storage = MemoryStorage()
     ingest_zip(snapshot_zip(), "venta.zip", storage)
     before = dict(storage.files)
-    with pytest.raises(SnapshotConflictError, match="no se sobrescribe"):
-        ingest_zip(other(), "venta.zip", storage)
+    expected = re.escape(f"(cambiaron: {VENTA_2026}); no se sobrescribe")
+    with pytest.raises(SnapshotConflictError, match=expected):
+        ingest_zip(revised_zip(), "venta.zip", storage)
     assert storage.files == before
+
+
+def test_added_and_missing_files_are_reported():
+    storage = MemoryStorage()
+    ingest_zip(snapshot_zip(), "venta.zip", storage)
+    files = fixture_files()
+    files["leeme_faq.txt"] = b"preguntas frecuentes"
+    del files["catalogos/tc_pais_origen.csv"]
+    with pytest.raises(SnapshotConflictError) as exc:
+        ingest_zip(make_zip(files), "venta.zip", storage)
+    assert "nuevos: leeme_faq.txt" in str(exc.value)
+    assert "faltan: catalogos/tc_pais_origen.csv" in str(exc.value)
+
+
+def test_stored_manifest_without_file_hashes_is_a_conflict():
+    storage = MemoryStorage()
+    ingest_zip(snapshot_zip(), "venta.zip", storage)
+    manifest = json.loads(storage.files[VENTA_PARTITION + "manifest.json"])
+    del manifest["files_sha256"]
+    storage.files[VENTA_PARTITION + "manifest.json"] = json.dumps(manifest).encode()
+    with pytest.raises(SnapshotConflictError, match="no registra el sha256 de cada archivo"):
+        ingest_zip(repackaged_zip(), "venta.zip", storage)
 
 
 def test_partial_previous_write_is_completed():
@@ -308,12 +349,20 @@ def test_cli_ingests_a_folder_and_is_idempotent(samples, tmp_path, caplog):
 
 def test_cli_conflict_exits_with_error(samples, tmp_path, caplog):
     main(["ingest", "--zip", str(samples / "conjunto_de_datos_raiavl_mensual_venta_csv.zip")])
-    other = tmp_path / "venta_deflated.zip"
-    other.write_bytes(snapshot_zip(compression=zipfile.ZIP_DEFLATED))
+    other = tmp_path / "venta_revisada.zip"
+    other.write_bytes(revised_zip())
     with pytest.raises(SystemExit) as exc:
         main(["ingest", "--zip", str(other)])
     assert exc.value.code == 1
     assert any("no se sobrescribe" in m for m in caplog.messages)
+
+
+def test_cli_repackaged_zip_is_not_an_error(samples, tmp_path, caplog):
+    main(["ingest", "--zip", str(samples / "conjunto_de_datos_raiavl_mensual_venta_csv.zip")])
+    other = tmp_path / "venta_reempaquetada.zip"
+    other.write_bytes(repackaged_zip())
+    main(["ingest", "--zip", str(other)])  # no lanza SystemExit: termina con código 0
+    assert any("mismo contenido con otro empaquetado" in m for m in caplog.messages)
 
 
 @pytest.mark.parametrize(

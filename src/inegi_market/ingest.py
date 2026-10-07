@@ -8,10 +8,16 @@ fecha de publicación (`modified` de los metadatos que trae el propio zip):
         metadatos_raiavl_<producto>_mensual_<años>.txt        copia del metadato
         manifest.json                                          se escribe al final
 
-El manifiesto marca que la foto quedó completa. Una foto guardada nunca se
-sobrescribe: con el mismo sha256 no se hace nada; con otro sha256 para la misma
-fecha, la ingesta se detiene con error. El producto y la fecha salen del
-contenido del zip, no de su nombre (un zip subido a mano puede llamarse como sea).
+El manifiesto marca que la foto quedó completa y guarda, además del sha256 del
+zip, el sha256 de cada archivo ya descomprimido. Una foto guardada nunca se
+sobrescribe. Si llega otra con la misma fecha:
+- mismo zip: no se hace nada;
+- otro zip con los mismos archivos por dentro (el INEGI lo regeneró con otra
+  compresión, otras fechas internas u otro orden): no se escribe nada y se avisa;
+- contenido distinto (revisión silenciosa): la ingesta se detiene con error y dice
+  qué archivos cambiaron.
+El producto y la fecha salen del contenido del zip, no de su nombre (un zip
+subido a mano puede llamarse como sea).
 """
 from __future__ import annotations
 
@@ -59,11 +65,12 @@ class SnapshotInfo:
     metadata_name: str
     metadata_bytes: bytes
     compression: str
+    files_sha256: dict[str, str]  # sha256 de cada archivo descomprimido, por ruta
 
 
 @dataclass(frozen=True)
 class IngestResult:
-    status: str  # "ingested" o "already_present"
+    status: str  # "ingested", "already_present" o "same_content"
     product: str
     publication_date: date
     partition: str
@@ -102,6 +109,18 @@ def _compression(infos: list[zipfile.ZipInfo]) -> str:
     return _COMPRESSION.get(kind, f"type_{kind}")
 
 
+def _hash_members(zf: zipfile.ZipFile, files: list[zipfile.ZipInfo]) -> dict[str, str]:
+    """sha256 de cada archivo descomprimido. Al leerlo completo, zipfile verifica el CRC."""
+    hashes = {}
+    for info in files:
+        digest = hashlib.sha256()
+        with zf.open(info) as member:
+            while chunk := member.read(1 << 20):
+                digest.update(chunk)
+        hashes[info.filename] = digest.hexdigest()
+    return dict(sorted(hashes.items()))
+
+
 def read_snapshot_info(data: bytes) -> SnapshotInfo:
     """Valida el empaquetado del zip y lee producto y fechas de su metadato."""
     try:
@@ -109,16 +128,14 @@ def read_snapshot_info(data: bytes) -> SnapshotInfo:
     except zipfile.BadZipFile as exc:
         raise IngestError(f"no es un zip válido ({exc})") from None
     with zf:
+        files = [info for info in zf.infolist() if not info.is_dir()]
+        names = [info.filename for info in files]
         try:
-            broken = zf.testzip()  # lee todo y verifica el CRC de cada archivo
+            files_sha256 = _hash_members(zf, files)
         except (zipfile.BadZipFile, zlib.error, EOFError, NotImplementedError) as exc:
             raise IngestError(
                 f"el zip está corrupto o usa una compresión no soportada ({exc})"
             ) from None
-        if broken:
-            raise IngestError(f"el zip está corrupto: falla el CRC de {broken!r}")
-        files = [info for info in zf.infolist() if not info.is_dir()]
-        names = [info.filename for info in files]
 
         metadata = [n for n in names if n.startswith("metadatos/") and n.endswith(".txt")]
         if len(metadata) != 1:
@@ -163,7 +180,19 @@ def read_snapshot_info(data: bytes) -> SnapshotInfo:
         metadata_name=metadata_name,
         metadata_bytes=metadata_bytes,
         compression=_compression(files),
+        files_sha256=files_sha256,
     )
+
+
+def _describe_changes(stored: dict[str, str] | None, new: dict[str, str]) -> str:
+    if stored is None:
+        return "la foto guardada no registra el sha256 de cada archivo"
+    groups = {
+        "cambiaron": sorted(n for n in stored.keys() & new.keys() if stored[n] != new[n]),
+        "nuevos": sorted(new.keys() - stored.keys()),
+        "faltan": sorted(stored.keys() - new.keys()),
+    }
+    return "; ".join(f"{label}: {', '.join(names)}" for label, names in groups.items() if names)
 
 
 def ingest_zip(
@@ -180,14 +209,22 @@ def ingest_zip(
     label = f"{info.product} {info.modified.isoformat()}"
 
     if storage.exists(manifest_path):
-        stored = json.loads(storage.read_bytes(manifest_path))["sha256"]
-        if stored == sha256:
+        stored = json.loads(storage.read_bytes(manifest_path))
+        if stored["sha256"] == sha256:
             log.info("%s: ya existe con el mismo sha256; no se hace nada", label)
             return IngestResult("already_present", info.product, info.modified, partition, sha256)
+        stored_files = stored.get("files_sha256")
+        if stored_files == info.files_sha256:
+            log.warning(
+                "%s: mismo contenido con otro empaquetado (zip guardado sha256 %s, nuevo %s); "
+                "se conserva la foto guardada y no se escribe nada",
+                label, stored["sha256"][:12], sha256[:12],
+            )
+            return IngestResult("same_content", info.product, info.modified, partition, sha256)
         raise SnapshotConflictError(
-            f"{label}: ya hay una foto guardada con otro contenido (guardada sha256={stored}, "
-            f"nueva sha256={sha256}); no se sobrescribe. Revisa si el INEGI republicó sin "
-            "cambiar la fecha 'modified'."
+            f"{label}: ya hay una foto guardada con otro contenido y la misma fecha 'modified' "
+            f"({_describe_changes(stored_files, info.files_sha256)}); no se sobrescribe. "
+            f"sha256 del zip guardado {stored['sha256']}, del nuevo {sha256}."
         )
 
     # Sin manifiesto la partición no está completa (p. ej., un intento previo que se
@@ -209,6 +246,7 @@ def ingest_zip(
         "original_name": original_name,
         "zip_name": zip_name,
         "metadata_name": metadata_file,
+        "files_sha256": info.files_sha256,
     }
     body = json.dumps(manifest, ensure_ascii=False, indent=2) + "\n"
     storage.write_bytes(manifest_path, body.encode("utf-8"))

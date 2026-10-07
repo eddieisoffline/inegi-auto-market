@@ -54,7 +54,7 @@ Cada publicación del INEGI se guarda como una foto, sin tocarla:
 raw/raiavl/<producto>/publication_date=AAAA-MM-DD/
     conjunto_de_datos_raiavl_mensual_<producto>_csv.zip   el zip tal como llegó
     metadatos_raiavl_<producto>_mensual_<años>.txt        copia del metadato
-    manifest.json                                          producto, modified, temporal, sha256, tamaño, compresión, fecha de ingesta, nombre original
+    manifest.json                                          producto, modified, temporal, sha256 del zip y de cada archivo, tamaño, compresión, fecha de ingesta, nombre original
 ```
 
 - El producto y la fecha (`modified`) se leen del metadato que trae el zip, no del
@@ -62,9 +62,14 @@ raw/raiavl/<producto>/publication_date=AAAA-MM-DD/
 - Antes de guardar, se comprueba que sea un zip íntegro (CRC) con un metadato y CSV
   del mismo producto. Se aceptan zips comprimidos y sin comprimir; la fuente ha
   usado ambos.
-- Nunca se sobrescribe una foto: si ya existe con el mismo sha256 no se hace nada;
-  si existe con otro contenido para la misma fecha, la ingesta se detiene con error.
-  El manifiesto se escribe al final y marca que la foto quedó completa.
+- Nunca se sobrescribe una foto. El manifiesto se escribe al final y marca que la
+  foto quedó completa. Si llega otro zip con la misma fecha `modified`:
+  - mismo zip (mismo sha256): no se hace nada;
+  - otro zip con los mismos archivos por dentro: no se escribe nada y se avisa. Pasa
+    cuando el INEGI regenera el zip sin cambiar datos: los bytes del zip cambian con
+    la compresión, la fecha interna de cada archivo y el orden;
+  - otro contenido (revisión silenciosa): la ingesta se detiene con error y lista
+    los archivos que cambiaron, aparecieron o faltan.
 
 ```bash
 python -m inegi_market.cli ingest --zip data/samples/2026-10-07          # carpeta con los 4 zips
