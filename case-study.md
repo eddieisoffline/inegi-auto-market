@@ -8,7 +8,6 @@ summary:
   en: "Pipeline that stores every monthly INEGI release on light-vehicle sales, production, and exports as an immutable snapshot, to analyze brands, seasonality, and the exchange rate, and to measure how figures get revised between releases. Work in progress: snapshot ingestion with revision detection is live."
 tools: ["Python", "pytest", "GitHub Actions"]
 repo_url: "https://github.com/eddieisoffline/inegi-auto-market"
-cover_image: ""
 featured: false
 date: "2026-10-07"
 ---
