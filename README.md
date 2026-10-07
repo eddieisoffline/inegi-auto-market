@@ -17,7 +17,7 @@ cuánto las explican el tipo de cambio y otras variables? Incluye un pronóstico
 | --- | --- | --- |
 | Esqueleto, configuración y almacenamiento local/GCS | Hecho | `pytest` y `ruff` en verde en local |
 | Fixtures de prueba recortados de las dos fotos reales | Hecho | 8 recortes (4 productos × 2 fotos), 71 KB |
-| CI en GitHub Actions | Pendiente | El workflow existe; aún no hay repositorio remoto |
+| CI en GitHub Actions | Hecho | ruff y pytest en verde en cada push a `main` |
 | Ingesta de una foto a raw | Hecho (local) | `ingest` con las dos fotos reales: 8 particiones (2 por producto), bytes idénticos a los originales; la segunda ejecución no escribe nada |
 | Detector de publicación nueva y descarga | Pendiente | |
 | Capa curated (Parquet) | Pendiente | |
