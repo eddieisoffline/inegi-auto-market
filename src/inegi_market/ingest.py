@@ -1,1 +1,240 @@
-"""Ingesta de una foto (zip del INEGI) a la capa raw. Se implementa en la iteración 1."""
+"""Ingesta de una foto del RAIAVL (zip del INEGI) a la capa raw.
+
+Cada publicación se guarda tal como llegó, en una partición por producto y por
+fecha de publicación (`modified` de los metadatos que trae el propio zip):
+
+    raw/raiavl/<producto>/publication_date=YYYY-MM-DD/
+        conjunto_de_datos_raiavl_mensual_<producto>_csv.zip   bytes originales
+        metadatos_raiavl_<producto>_mensual_<años>.txt        copia del metadato
+        manifest.json                                          se escribe al final
+
+El manifiesto marca que la foto quedó completa. Una foto guardada nunca se
+sobrescribe: con el mismo sha256 no se hace nada; con otro sha256 para la misma
+fecha, la ingesta se detiene con error. El producto y la fecha salen del
+contenido del zip, no de su nombre (un zip subido a mano puede llamarse como sea).
+"""
+from __future__ import annotations
+
+import hashlib
+import io
+import json
+import logging
+import re
+import zipfile
+import zlib
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import date, datetime, timezone
+from pathlib import Path, PurePosixPath
+
+from .storage import Storage
+
+log = logging.getLogger(__name__)
+
+PRODUCTS = ("venta", "produccion", "exportacion", "hibrido")
+RAW_PREFIX = "raw/raiavl"
+ZIP_NAME = "conjunto_de_datos_raiavl_mensual_{product}_csv.zip"
+
+_METADATA_NAME = re.compile(r"metadatos/metadatos_raiavl_([a-z]+)_mensual_[^/]*\.txt")
+_DATA_NAME = re.compile(r"conjunto_de_datos/raiavl_([a-z]+)_mensual_tr_cifra_\d{4}\.csv")
+_ISO_DATE = r"\d{4}-\d{2}-\d{2}"
+_COMPRESSION = {zipfile.ZIP_STORED: "stored", zipfile.ZIP_DEFLATED: "deflated"}
+
+
+class IngestError(ValueError):
+    """La foto no se puede ingerir; el mensaje dice por qué."""
+
+
+class SnapshotConflictError(IngestError):
+    """Ya hay una foto guardada con la misma fecha y otro contenido."""
+
+
+@dataclass(frozen=True)
+class SnapshotInfo:
+    product: str
+    modified: date
+    temporal: str
+    temporal_start: date
+    temporal_end: date
+    metadata_name: str
+    metadata_bytes: bytes
+    compression: str
+
+
+@dataclass(frozen=True)
+class IngestResult:
+    status: str  # "ingested" o "already_present"
+    product: str
+    publication_date: date
+    partition: str
+    sha256: str
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def partition_path(product: str, publication_date: date) -> str:
+    return f"{RAW_PREFIX}/{product}/publication_date={publication_date.isoformat()}/"
+
+
+def _metadata_field(text: str, key: str, name: str) -> str:
+    values = re.findall(rf"^{key}:[ \t]*(.*?)[ \t]*\r?$", text, re.MULTILINE)
+    if len(values) != 1:
+        raise IngestError(f"{name}: se esperaba una línea '{key}:' y hay {len(values)}")
+    return values[0]
+
+
+def _parse_date(value: str, what: str) -> date:
+    try:
+        if not re.fullmatch(_ISO_DATE, value):
+            raise ValueError
+        return date.fromisoformat(value)
+    except ValueError:
+        raise IngestError(f"{what} no es una fecha AAAA-MM-DD válida: {value!r}") from None
+
+
+def _compression(infos: list[zipfile.ZipInfo]) -> str:
+    kinds = {info.compress_type for info in infos}
+    if len(kinds) > 1:
+        return "mixed"
+    (kind,) = kinds
+    return _COMPRESSION.get(kind, f"type_{kind}")
+
+
+def read_snapshot_info(data: bytes) -> SnapshotInfo:
+    """Valida el empaquetado del zip y lee producto y fechas de su metadato."""
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(data))
+    except zipfile.BadZipFile as exc:
+        raise IngestError(f"no es un zip válido ({exc})") from None
+    with zf:
+        try:
+            broken = zf.testzip()  # lee todo y verifica el CRC de cada archivo
+        except (zipfile.BadZipFile, zlib.error, EOFError, NotImplementedError) as exc:
+            raise IngestError(
+                f"el zip está corrupto o usa una compresión no soportada ({exc})"
+            ) from None
+        if broken:
+            raise IngestError(f"el zip está corrupto: falla el CRC de {broken!r}")
+        files = [info for info in zf.infolist() if not info.is_dir()]
+        names = [info.filename for info in files]
+
+        metadata = [n for n in names if n.startswith("metadatos/") and n.endswith(".txt")]
+        if len(metadata) != 1:
+            raise IngestError(
+                f"el zip debe traer exactamente un metadatos/*.txt y trae {len(metadata)}"
+            )
+        metadata_name = metadata[0]
+        match = _METADATA_NAME.fullmatch(metadata_name)
+        if not match or match.group(1) not in PRODUCTS:
+            raise IngestError(f"no se reconoce el producto en el metadato {metadata_name!r}")
+        product = match.group(1)
+
+        data_products = {m.group(1) for n in names if (m := _DATA_NAME.fullmatch(n))}
+        if not data_products:
+            raise IngestError(
+                "el zip no trae CSV con el nombre esperado en conjunto_de_datos/ "
+                f"(raiavl_{product}_mensual_tr_cifra_AAAA.csv)"
+            )
+        if data_products != {product}:
+            raise IngestError(
+                f"el metadato dice {product!r} pero los CSV de conjunto_de_datos/ son de "
+                f"{sorted(data_products)}"
+            )
+
+        metadata_bytes = zf.read(metadata_name)
+
+    try:
+        text = metadata_bytes.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise IngestError(f"{metadata_name} no está en UTF-8 ({exc})") from None
+    modified = _parse_date(_metadata_field(text, "modified", metadata_name), "modified")
+    temporal = _metadata_field(text, "temporal", metadata_name)
+    period = re.fullmatch(rf"({_ISO_DATE})-({_ISO_DATE})", temporal)
+    if not period:
+        raise IngestError(f"temporal no tiene la forma AAAA-MM-DD-AAAA-MM-DD: {temporal!r}")
+    return SnapshotInfo(
+        product=product,
+        modified=modified,
+        temporal=temporal,
+        temporal_start=_parse_date(period.group(1), "inicio de temporal"),
+        temporal_end=_parse_date(period.group(2), "fin de temporal"),
+        metadata_name=metadata_name,
+        metadata_bytes=metadata_bytes,
+        compression=_compression(files),
+    )
+
+
+def ingest_zip(
+    data: bytes,
+    original_name: str,
+    storage: Storage,
+    now: Callable[[], datetime] = _utcnow,
+) -> IngestResult:
+    """Guarda la foto en raw/ si no existe; nunca sobrescribe una foto completa."""
+    info = read_snapshot_info(data)
+    sha256 = hashlib.sha256(data).hexdigest()
+    partition = partition_path(info.product, info.modified)
+    manifest_path = partition + "manifest.json"
+    label = f"{info.product} {info.modified.isoformat()}"
+
+    if storage.exists(manifest_path):
+        stored = json.loads(storage.read_bytes(manifest_path))["sha256"]
+        if stored == sha256:
+            log.info("%s: ya existe con el mismo sha256; no se hace nada", label)
+            return IngestResult("already_present", info.product, info.modified, partition, sha256)
+        raise SnapshotConflictError(
+            f"{label}: ya hay una foto guardada con otro contenido (guardada sha256={stored}, "
+            f"nueva sha256={sha256}); no se sobrescribe. Revisa si el INEGI republicó sin "
+            "cambiar la fecha 'modified'."
+        )
+
+    # Sin manifiesto la partición no está completa (p. ej., un intento previo que se
+    # cortó): se escribe todo de nuevo y el manifiesto al final.
+    zip_name = ZIP_NAME.format(product=info.product)
+    metadata_file = PurePosixPath(info.metadata_name).name
+    storage.write_bytes(partition + zip_name, data)
+    storage.write_bytes(partition + metadata_file, info.metadata_bytes)
+    manifest = {
+        "product": info.product,
+        "modified": info.modified.isoformat(),
+        "temporal": info.temporal,
+        "temporal_start": info.temporal_start.isoformat(),
+        "temporal_end": info.temporal_end.isoformat(),
+        "sha256": sha256,
+        "size_bytes": len(data),
+        "compression": info.compression,
+        "ingested_at": now().isoformat(timespec="seconds"),
+        "original_name": original_name,
+        "zip_name": zip_name,
+        "metadata_name": metadata_file,
+    }
+    body = json.dumps(manifest, ensure_ascii=False, indent=2) + "\n"
+    storage.write_bytes(manifest_path, body.encode("utf-8"))
+    log.info(
+        "%s: foto guardada en %s (%s, %d bytes, sha256 %s)",
+        label, partition, info.compression, len(data), sha256[:12],
+    )
+    return IngestResult("ingested", info.product, info.modified, partition, sha256)
+
+
+def find_zips(path: str | Path) -> list[Path]:
+    """Un zip, o todos los *.zip de una carpeta en orden alfabético."""
+    p = Path(path)
+    if p.is_dir():
+        zips = sorted(p.glob("*.zip"))
+        if not zips:
+            raise IngestError(f"no hay archivos .zip en {p}")
+        return zips
+    if p.is_file():
+        return [p]
+    raise IngestError(f"no existe: {p}")
+
+
+def ingest_file(
+    path: str | Path, storage: Storage, now: Callable[[], datetime] = _utcnow
+) -> IngestResult:
+    """Ingiere un zip local. Del nombre original solo se guarda el archivo, sin carpetas."""
+    p = Path(path)
+    return ingest_zip(p.read_bytes(), p.name, storage, now)

@@ -11,17 +11,38 @@ def fixture_dir(snapshot: str, product: str) -> Path:
     return FIXTURES / snapshot / product
 
 
-def build_zip(src_dir: Path, compression: int = zipfile.ZIP_STORED) -> bytes:
-    """Arma en memoria un zip con la estructura de `src_dir`, como los del INEGI.
+def tree_files(src_dir: Path) -> dict[str, bytes]:
+    """Contenido de una carpeta como {ruta dentro del zip: bytes}."""
+    return {
+        p.relative_to(src_dir).as_posix(): p.read_bytes()
+        for p in sorted(src_dir.rglob("*"))
+        if p.is_file()
+    }
 
-    Los zips no se versionan (`*.zip` está en .gitignore), así que las pruebas
-    los construyen a partir de los fixtures. Es determinista: fecha y orden
-    fijos, para que el mismo árbol produzca siempre los mismos bytes.
+
+def fixture_files(snapshot: str = "2026-10-07", product: str = "venta") -> dict[str, bytes]:
+    return tree_files(fixture_dir(snapshot, product))
+
+
+def make_zip(files: dict[str, bytes], compression: int = zipfile.ZIP_STORED) -> bytes:
+    """Arma un zip en memoria, determinista (fecha y orden fijos).
+
+    Las rutas que terminan en "/" son entradas de directorio, como las que traían
+    los zips del INEGI del 2026-09-09; se guardan sin comprimir, igual que en la fuente.
     """
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
-        for path in sorted(p for p in src_dir.rglob("*") if p.is_file()):
-            info = zipfile.ZipInfo(path.relative_to(src_dir).as_posix(), (2026, 1, 1, 0, 0, 0))
-            info.compress_type = compression
-            zf.writestr(info, path.read_bytes())
+        for name, data in files.items():
+            info = zipfile.ZipInfo(name, (2026, 1, 1, 0, 0, 0))
+            info.compress_type = zipfile.ZIP_STORED if name.endswith("/") else compression
+            zf.writestr(info, data)
     return buf.getvalue()
+
+
+def build_zip(src_dir: Path, compression: int = zipfile.ZIP_STORED) -> bytes:
+    """Zip con la estructura de `src_dir`, como los del INEGI.
+
+    Los zips no se versionan (`*.zip` está en .gitignore), así que las pruebas
+    los construyen a partir de los fixtures.
+    """
+    return make_zip(tree_files(src_dir), compression)
