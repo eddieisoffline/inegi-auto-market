@@ -22,7 +22,7 @@ cuánto las explican el tipo de cambio y otras variables? Incluye un pronóstico
 | Detector de publicación nueva y descarga | Hecho (desde la máquina del autor) | `fetch` contra el INEGI real: 4 zips descargados en 141 s, idénticos byte a byte a los bajados a mano; después, `check` y `fetch` sin descargas en ~1 s. Pendiente probarlo desde Cloud Run |
 | Capa curated (Parquet) | Hecho (local) | `curate` de las dos fotos reales: 640,889 filas en 162 Parquet (4.7 MB); los totales mensuales cuadran con la suma de los CSV en las 8 fotos y con las cifras oficiales anotadas; volver a curar deja los archivos idénticos |
 | Contratos de datos | Hecho (local) | Corren dentro de `curate`: las dos fotos reales pasan sin advertencias; una foto real sin el año 2020 se detiene sin escribir nada. Repetidos sobre 249 meses de historia: 1 error (salida real de Chirey en 2025-04) y 2 advertencias |
-| Clientes de API y conciliación | Pendiente | |
+| Clientes de API y conciliación | Hecho (local, APIs reales) | `reconcile` contra la API del INEGI: los 261 meses (2005-01 a 2026-09) de ventas, producción y exportación de la foto 2026-10-07 cuadran exacto; en la foto 2026-09-09, la única diferencia es agosto de 2026 en ventas (+1, dentro de tolerancia). `fx`: 5,477 días de Banxico (2005-01-03 a 2026-10-08), 262 meses |
 | Diff entre fotos | Pendiente | |
 | Warehouse en BigQuery y marts | Pendiente | |
 | Pronóstico con backtesting | Pendiente | |
@@ -49,7 +49,8 @@ Transformaciones aplicadas a los datos del INEGI (se amplía en cada iteración)
   ningún valor (ver [tests/fixtures/README.md](tests/fixtures/README.md)).
 
 Tipo de cambio: Banco de México, Sistema de Información Económica (SIE), serie
-SF43718 (tipo de cambio FIX). Aún no se usa en el código.
+SF43718 (tipo de cambio FIX). Se guarda la respuesta tal como llega y, en curated, el
+dato diario y, por mes, el promedio y el dato del último día hábil.
 
 ## Capa raw
 
@@ -130,6 +131,30 @@ grande de ventas. Un error detiene el lote sin escribir nada; las advertencias (
 marcas con ventas, muchas correcciones negativas, secuencia de estatus inesperada) quedan
 en el log y en el reporte. Si una marca grande dejó de vender de verdad, se reconoce con
 `curate --acknowledge-exit MARCA`. Reglas y calibración: [docs/contratos.md](docs/contratos.md).
+
+## Conciliación y tipo de cambio
+
+```bash
+python -m inegi_market.cli reconcile   # suma mensual de curated contra la API del INEGI
+python -m inegi_market.cli fx          # tipo de cambio FIX de Banxico a raw y curated
+```
+
+- **Conciliación.** Para ventas, producción y exportación compara, mes por mes, la suma de
+  la foto curated más reciente (o la de `--publication-date`) con los totales nacionales
+  del Banco de Indicadores del INEGI (indicadores 6207131346, 6207131345 y 6207131349).
+  Tolerancia: 0 en producción y exportación, ±0.01 % en ventas. El resultado siempre se
+  escribe en `curated/recon/` con ambas cifras, la diferencia y el veredicto (`cuadra`,
+  `dentro_de_tolerancia`, `fuera_de_tolerancia`, `sin_dato_api`, `sin_dato_csv`); si un
+  mes queda fuera de tolerancia, el comando termina con código 1 y lista esos meses. La
+  API suele traer un mes que los zips aún no: queda como `sin_dato_csv` y no es error.
+  `OBS_VALUE` se lee como `Decimal`, nunca como `float`.
+- **Tipo de cambio.** Descarga la serie diaria desde 2005 y escribe
+  `curated/tipo_cambio_diario/` y `curated/tipo_cambio_mensual/` (promedio y último día
+  hábil, con `mes_completo` en falso para el mes en curso). Un día sin valor numérico se
+  omite y se cuenta.
+- **Tokens.** Solo se leen de `INEGI_TOKEN` y `BANXICO_TOKEN`. Sin token, el comando se
+  detiene antes de llamar a la API. El token del INEGI va en la URL, así que la URL nunca
+  se registra y el token se borra de cualquier mensaje y de la respuesta guardada en raw.
 
 ## Desarrollo
 

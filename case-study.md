@@ -29,7 +29,7 @@ Proyecto en construcción. Esta página se actualiza en cada iteración y solo d
 | Detector de publicación nueva y descarga automática | Hecho |
 | Capa curated en Parquet (tipos, normalización, duplicados) | Hecho |
 | Contratos de datos que detienen un lote defectuoso | Hecho |
-| Conciliación contra la API del INEGI y tipo de cambio de Banxico | Pendiente |
+| Conciliación contra la API del INEGI y tipo de cambio de Banxico | Hecho |
 | Comparación entre publicaciones (qué se revisó y por qué) | Pendiente |
 | Warehouse en BigQuery y marts | Pendiente |
 | Pronóstico con backtesting contra baseline | Pendiente |
@@ -54,7 +54,9 @@ Hoy existen la detección y descarga de publicaciones nuevas, la capa `raw` y la
   - si es una corrección silenciosa, la ingesta se detiene y lista los archivos que cambiaron.
 - **Capa curated:** cada foto se convierte en Parquet tipado. Se recortan espacios, se agregan el modelo sin el guion final y una clave en minúsculas, y se suman las filas que la fuente repite; cada fila conserva su estatus y la fecha de la publicación. Las dos publicaciones reales dan 640,889 filas en 162 archivos (4.7 MB). Los totales mensuales cuadran con la suma directa de los CSV en todos los meses de las 8 fotos, y con las cifras oficiales anotadas (por ejemplo, ventas de septiembre de 2026: 129,274). Volver a curar tarda 7.6 s y deja los archivos idénticos byte a byte.
 - **Contratos de datos:** antes de escribir cada foto en curated se revisan columnas, tipos, claves, estatus, continuidad de los meses contra el periodo que declara el propio INEGI, códigos contra sus catálogos y que no desaparezca una marca grande de ventas. Un error detiene el lote sin escribir nada; las advertencias quedan registradas. Para calibrar los umbrales, las reglas se aplicaron como si cada mes desde 2006 hubiera sido el último publicado: en 249 meses de ventas habrían frenado un solo lote (abril de 2025, cuando Chirey, con 1.24 % del mercado, dejó de reportar), y en exportación habrían dejado dos advertencias. Las dos publicaciones reales pasan sin advertencias.
-- **Pruebas sin red:** 156 pruebas corren en GitHub Actions en cada push. Usan fixtures de 71 KB recortados de las publicaciones reales, sin cambiar ningún valor. Los fixtures incluyen a propósito los casos difíciles: claves duplicadas, correcciones negativas, una marca que cambia de nombre y la reclasificación de BMW. El servidor del INEGI se simula, incluidos 403, cortes de red, descargas incompletas y réplicas con cabeceras distintas.
+- **Conciliación contra la API del INEGI:** los totales mensuales de curated se comparan con los totales nacionales del Banco de Indicadores, con tolerancia cero en producción y exportación y de ±0.01 % en ventas; el resultado de cada mes queda guardado. Contra la API real, los 261 meses de la publicación de octubre (2005-01 a 2026-09) cuadran exacto en los tres productos. En la de septiembre, la única diferencia en toda la historia es agosto de 2026 en ventas: 1 unidad (0.0008 %), una revisión que la API ya traía.
+- **Tipo de cambio:** la serie FIX de Banxico desde 2005 (5,477 días) se guarda por día y, por mes, como promedio y como dato del último día hábil.
+- **Pruebas sin red:** 194 pruebas corren en GitHub Actions en cada push. Usan fixtures de 71 KB recortados de las publicaciones reales, sin cambiar ningún valor. Los fixtures incluyen a propósito los casos difíciles: claves duplicadas, correcciones negativas, una marca que cambia de nombre y la reclasificación de BMW. El servidor del INEGI se simula, incluidos 403, cortes de red, descargas incompletas y réplicas con cabeceras distintas.
 
 ## Hallazgos sobre la fuente
 
@@ -78,11 +80,11 @@ Medidos al comparar dos publicaciones reales (septiembre y octubre de 2026). El 
 
 ## Stack
 
-Hoy: Python (pandas, pyarrow), Parquet, pytest, ruff, GitHub Actions. Planeado: SQL en BigQuery, Cloud Storage, Cloud Run Jobs, Cloud Scheduler, Terraform y un dashboard en Looker Studio.
+Hoy: Python (pandas, pyarrow), Parquet, APIs del INEGI y de Banxico, pytest, ruff, GitHub Actions. Planeado: SQL en BigQuery, Cloud Storage, Cloud Run Jobs, Cloud Scheduler, Terraform y un dashboard en Looker Studio.
 
 ## Datos
 
-Fuente: INEGI, Registro Administrativo de la Industria Automotriz de Vehículos Ligeros (RAIAVL), [datos abiertos](https://www.inegi.org.mx/datosprimarios/iavl/) usados bajo los [términos de libre uso del INEGI](https://www.inegi.org.mx/inegi/terminos.html). Este proyecto es independiente: el INEGI no lo respalda ni lo revisa. La capa raw guarda los zips tal como se publicaron. La capa curated fija tipos, recorta espacios, agrega el modelo normalizado y suma las filas repetidas (0.110 % de las unidades de ventas); no cambia ningún valor de unidades. El tipo de cambio vendrá del Sistema de Información Económica (SIE) de Banxico, serie SF43718.
+Fuente: INEGI, Registro Administrativo de la Industria Automotriz de Vehículos Ligeros (RAIAVL), [datos abiertos](https://www.inegi.org.mx/datosprimarios/iavl/) usados bajo los [términos de libre uso del INEGI](https://www.inegi.org.mx/inegi/terminos.html). Este proyecto es independiente: el INEGI no lo respalda ni lo revisa. La capa raw guarda los zips tal como se publicaron. La capa curated fija tipos, recorta espacios, agrega el modelo normalizado y suma las filas repetidas (0.110 % de las unidades de ventas); no cambia ningún valor de unidades. Tipo de cambio: Banco de México, Sistema de Información Económica (SIE), serie SF43718 (FIX).
 
 Documentación técnica: [README del repositorio](https://github.com/eddieisoffline/inegi-auto-market/blob/main/README.md), [reglas de la capa curated](https://github.com/eddieisoffline/inegi-auto-market/blob/main/docs/reglas_curated.md), [contratos de datos](https://github.com/eddieisoffline/inegi-auto-market/blob/main/docs/contratos.md) y [fixtures de prueba y sus casos](https://github.com/eddieisoffline/inegi-auto-market/blob/main/tests/fixtures/README.md).
 :::
@@ -104,7 +106,7 @@ Work in progress. This page is updated at every iteration and only describes wha
 | New-release detector and automatic download | Done |
 | Curated layer in Parquet (types, normalization, duplicates) | Done |
 | Data contracts that stop a bad batch | Done |
-| Reconciliation against the INEGI API and Banxico exchange rate | Pending |
+| Reconciliation against the INEGI API and Banxico exchange rate | Done |
 | Comparison between releases (what was revised and why) | Pending |
 | BigQuery warehouse and marts | Pending |
 | Forecast with backtesting against a baseline | Pending |
@@ -129,7 +131,9 @@ New-release detection and download, the `raw` layer, and the `curated` layer exi
   - if it is a silent correction, ingestion stops and lists the files that changed.
 - **Curated layer:** each snapshot becomes typed Parquet. Whitespace is trimmed, a model name without the trailing hyphen and a lowercase join key are added, and rows the source repeats are summed; every row keeps its status and release date. The two real releases produce 640,889 rows in 162 files (4.7 MB). Monthly totals match the direct sum of the CSVs in every month of all 8 snapshots, and the official figures on record (for example, September 2026 sales: 129,274). Re-curating takes 7.6 s and leaves the files byte-for-byte identical.
 - **Data contracts:** before each snapshot is written to curated, the pipeline checks columns, types, keys, statuses, month continuity against the period INEGI itself declares, codes against their catalogs, and that no large sales brand disappears. An error stops the batch without writing anything; warnings are recorded. To calibrate the thresholds, the rules were applied as if each month since 2006 had been the latest release: across 249 months of sales they would have stopped a single batch (April 2025, when Chirey, with 1.24% of the market, stopped reporting), and in exports they would have raised two warnings. Both real releases pass with no warnings.
-- **Offline tests:** 156 tests run on GitHub Actions on every push. They use 71 KB of fixtures cut from the real releases without changing any value. The fixtures deliberately include the hard cases: duplicate keys, negative corrections, a brand rename, and the BMW reclassification. INEGI's server is simulated, including 403s, network drops, incomplete downloads, and replicas with different headers.
+- **Reconciliation against the INEGI API:** monthly totals from curated are compared with the national totals in INEGI's indicator bank, with zero tolerance for production and exports and ±0.01% for sales; every month's result is stored. Against the real API, all 261 months of the October release (2005-01 to 2026-09) match exactly for all three products. In the September release, the only difference in the whole history is August 2026 sales: 1 unit (0.0008%), a revision the API already had.
+- **Exchange rate:** Banxico's FIX series since 2005 (5,477 days) is stored daily and, per month, as the average and the last business day's rate.
+- **Offline tests:** 194 tests run on GitHub Actions on every push. They use 71 KB of fixtures cut from the real releases without changing any value. The fixtures deliberately include the hard cases: duplicate keys, negative corrections, a brand rename, and the BMW reclassification. INEGI's server is simulated, including 403s, network drops, incomplete downloads, and replicas with different headers.
 
 ## Findings about the source
 
@@ -153,11 +157,11 @@ Measured by comparing two real releases (September and October 2026). The pipeli
 
 ## Stack
 
-Today: Python (pandas, pyarrow), Parquet, pytest, ruff, GitHub Actions. Planned: SQL on BigQuery, Cloud Storage, Cloud Run Jobs, Cloud Scheduler, Terraform, and a Looker Studio dashboard.
+Today: Python (pandas, pyarrow), Parquet, INEGI and Banxico APIs, pytest, ruff, GitHub Actions. Planned: SQL on BigQuery, Cloud Storage, Cloud Run Jobs, Cloud Scheduler, Terraform, and a Looker Studio dashboard.
 
 ## Data
 
-Source: INEGI, Registro Administrativo de la Industria Automotriz de Vehículos Ligeros (RAIAVL), [open data](https://www.inegi.org.mx/datosprimarios/iavl/) used under [INEGI's free-use terms](https://www.inegi.org.mx/inegi/terminos.html). This is an independent project: INEGI does not endorse or review it. The raw layer stores the zips exactly as published. The curated layer sets types, trims whitespace, adds the normalized model, and sums repeated rows (0.110% of sales units); it does not change any unit value. The exchange rate will come from Banxico's Economic Information System (SIE), series SF43718.
+Source: INEGI, Registro Administrativo de la Industria Automotriz de Vehículos Ligeros (RAIAVL), [open data](https://www.inegi.org.mx/datosprimarios/iavl/) used under [INEGI's free-use terms](https://www.inegi.org.mx/inegi/terminos.html). This is an independent project: INEGI does not endorse or review it. The raw layer stores the zips exactly as published. The curated layer sets types, trims whitespace, adds the normalized model, and sums repeated rows (0.110% of sales units); it does not change any unit value. Exchange rate: Banco de México, Economic Information System (SIE), series SF43718 (FIX).
 
 Technical documentation (in Spanish): [repository README](https://github.com/eddieisoffline/inegi-auto-market/blob/main/README.md), [curated layer rules](https://github.com/eddieisoffline/inegi-auto-market/blob/main/docs/reglas_curated.md), [data contracts](https://github.com/eddieisoffline/inegi-auto-market/blob/main/docs/contratos.md), and [test fixtures and their cases](https://github.com/eddieisoffline/inegi-auto-market/blob/main/tests/fixtures/README.md).
 :::

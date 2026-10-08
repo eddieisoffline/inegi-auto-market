@@ -7,8 +7,12 @@ from collections import Counter
 
 from .config import Settings
 from .curate import SPECS, CurateError, curate_all
+from .fx import update_fx
 from .ingest import IngestError, find_zips, ingest_file
-from .sources.zip_http import HttpClient, UrllibClient, check, fetch
+from .reconcile import ReconciliationError, reconcile
+from .sources.http_client import HttpClient, UrllibClient
+from .sources.inegi_api import INDICATORS, ApiError
+from .sources.zip_http import check, fetch
 from .storage import Storage, get_storage
 from .validate import ContractConfig, ValidationError
 
@@ -57,6 +61,20 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="MARCA",
         help="marca grande que dejó de vender y ya se revisó; se puede repetir",
     )
+
+    p_recon = sub.add_parser(
+        "reconcile", help="concilia los totales mensuales de curated contra la API del INEGI"
+    )
+    p_recon.add_argument(
+        "--product", dest="products", action="append", choices=sorted(INDICATORS),
+        help="solo este producto; se puede repetir (por defecto: venta, produccion y exportacion)",
+    )
+    p_recon.add_argument(
+        "--publication-date", metavar="AAAA-MM-DD",
+        help="foto curated a conciliar (por defecto: la más reciente de cada producto)",
+    )
+
+    sub.add_parser("fx", help="descarga el tipo de cambio FIX de Banxico a raw y curated")
     return parser
 
 
@@ -96,6 +114,17 @@ def main(argv: list[str] | None = None, client: HttpClient | None = None) -> Non
         return
 
     client = client or UrllibClient()
+    if args.command in ("reconcile", "fx"):
+        try:
+            if args.command == "reconcile":
+                reconcile(client, storage, args.products, args.publication_date)
+            else:
+                update_fx(client, storage)
+        except (ApiError, ReconciliationError) as exc:
+            log.error("%s detenido: %s", args.command, exc)
+            raise SystemExit(1) from None
+        return
+
     if args.command == "check":
         statuses = [r.status for r in check(client, storage)]
         failure = "error"

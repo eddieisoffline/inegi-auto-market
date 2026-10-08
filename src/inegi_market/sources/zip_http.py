@@ -22,27 +22,27 @@ from __future__ import annotations
 import json
 import logging
 import tempfile
-import time
-import urllib.error
-import urllib.request
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
-from typing import BinaryIO, Protocol
 
 from ..ingest import PRODUCTS, ZIP_NAME, IngestError, ingest_zip
 from ..storage import Storage
+from .http_client import (
+    DownloadError,
+    HttpClient,
+    HttpResponse,
+    RetryableError,
+    default_sleep,
+    with_retries,
+)
 
 log = logging.getLogger(__name__)
 
 BASE_URL = "https://www.inegi.org.mx/contenidos/datosprimarios/iavl/datosabiertos/"
 ZIP_URLS = {product: BASE_URL + ZIP_NAME.format(product=product) for product in PRODUCTS}
 STATE_PATH = "state/raiavl_head.json"
-USER_AGENT = "inegi-auto-market/0.1 (+https://github.com/eddieisoffline/inegi-auto-market)"
-TIMEOUT_SECONDS = 60.0
-RETRIES = 3
-BACKOFF_SECONDS = 5.0
 # Las réplicas del INEGI difirieron hasta 4 s en el Last-Modified de una misma publicación;
 # entre publicaciones pasan semanas.
 LAST_MODIFIED_TOLERANCE = timedelta(minutes=10)
@@ -51,91 +51,6 @@ MANUAL_HINT = (
     "'python -m inegi_market.cli ingest --zip RUTA', o corre 'fetch' desde una red "
     "donde la descarga sí funcione"
 )
-
-
-@dataclass(frozen=True)
-class HttpResponse:
-    status: int
-    headers: dict[str, str] = field(default_factory=dict)  # nombres en minúsculas
-
-
-class HttpClient(Protocol):
-    def head(self, url: str, headers: dict[str, str]) -> HttpResponse: ...
-    def get(self, url: str, headers: dict[str, str], dest: BinaryIO) -> HttpResponse: ...
-
-
-def _lower(headers) -> dict[str, str]:
-    return {k.lower(): v for k, v in (headers or {}).items()}
-
-
-class UrllibClient:
-    """Cliente real con la biblioteca estándar.
-
-    Una respuesta 4xx o 5xx se devuelve como `HttpResponse`; los errores de red
-    (DNS, conexión, timeout) se lanzan como `OSError`.
-    """
-
-    def __init__(self, user_agent: str = USER_AGENT, timeout: float = TIMEOUT_SECONDS):
-        self.user_agent = user_agent
-        self.timeout = timeout
-
-    def _open(self, method: str, url: str, headers: dict[str, str]):
-        request = urllib.request.Request(
-            url, method=method, headers={"User-Agent": self.user_agent, **headers}
-        )
-        return urllib.request.urlopen(request, timeout=self.timeout)
-
-    def head(self, url: str, headers: dict[str, str]) -> HttpResponse:
-        try:
-            with self._open("HEAD", url, headers) as response:
-                return HttpResponse(response.status, _lower(response.headers))
-        except urllib.error.HTTPError as exc:
-            exc.close()
-            return HttpResponse(exc.code, _lower(exc.headers))
-
-    def get(self, url: str, headers: dict[str, str], dest: BinaryIO) -> HttpResponse:
-        try:
-            with self._open("GET", url, headers) as response:
-                while chunk := response.read(1 << 20):
-                    dest.write(chunk)
-                return HttpResponse(response.status, _lower(response.headers))
-        except urllib.error.HTTPError as exc:
-            exc.close()
-            return HttpResponse(exc.code, _lower(exc.headers))
-
-
-class DownloadError(Exception):
-    """No se pudo consultar o descargar un zip tras los reintentos."""
-
-
-class _IncompleteDownload(Exception):
-    pass
-
-
-def _with_retries(
-    action: Callable[[], HttpResponse], what: str, sleep: Callable[[float], None]
-) -> HttpResponse:
-    """Repite ante error de red, HTTP 5xx o 429, o descarga incompleta.
-
-    Un 4xx se devuelve sin reintentar: un 403 no se arregla insistiendo.
-    """
-    for attempt in range(1, RETRIES + 1):
-        try:
-            response = action()
-        except OSError as exc:
-            problem = f"error de red ({exc})"
-        except _IncompleteDownload as exc:
-            problem = str(exc)
-        else:
-            if response.status < 500 and response.status != 429:
-                return response
-            problem = f"HTTP {response.status}"
-        if attempt < RETRIES:
-            wait = BACKOFF_SECONDS * 2 ** (attempt - 1)
-            log.warning("%s: %s; reintento %d de %d en %.0f s", what, problem, attempt,
-                        RETRIES - 1, wait)
-            sleep(wait)
-    raise DownloadError(f"{what}: {problem} tras {RETRIES} intentos")
 
 
 @dataclass(frozen=True)
@@ -160,8 +75,8 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _sleep(seconds: float) -> None:
-    time.sleep(seconds)  # se resuelve al llamar, así las pruebas pueden sustituirlo
+class _IncompleteDownload(RetryableError):
+    pass
 
 
 def load_state(storage: Storage) -> dict[str, dict]:
@@ -211,7 +126,7 @@ def _check_one(
     if known.get("last_modified"):
         conditional["If-Modified-Since"] = known["last_modified"]
     try:
-        response = _with_retries(lambda: client.head(url, conditional), f"HEAD {product}", sleep)
+        response = with_retries(lambda: client.head(url, conditional), f"HEAD {product}", sleep)
     except DownloadError as exc:
         return CheckResult(product, url, "error", detail=str(exc))
 
@@ -231,7 +146,7 @@ def _check_one(
 def check(
     client: HttpClient,
     storage: Storage,
-    sleep: Callable[[float], None] = _sleep,
+    sleep: Callable[[float], None] = default_sleep,
     urls: dict[str, str] = ZIP_URLS,
 ) -> list[CheckResult]:
     """HEAD a cada URL y comparación con el estado guardado. No descarga ni escribe."""
@@ -271,7 +186,7 @@ def _download_and_ingest(
             return response
 
         try:
-            response = _with_retries(attempt, f"GET {product}", sleep)
+            response = with_retries(attempt, f"GET {product}", sleep)
         except DownloadError as exc:
             return FetchResult(product, "failed", f"{failed} ({exc}); {MANUAL_HINT}"), None
         if response.status != 200:
@@ -303,7 +218,7 @@ def fetch(
     client: HttpClient,
     storage: Storage,
     now: Callable[[], datetime] = _utcnow,
-    sleep: Callable[[float], None] = _sleep,
+    sleep: Callable[[float], None] = default_sleep,
     urls: dict[str, str] = ZIP_URLS,
 ) -> list[FetchResult]:
     """Descarga e ingiere los zips que cambiaron. Un producto que falla no frena a los demás."""

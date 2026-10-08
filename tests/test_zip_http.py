@@ -10,16 +10,9 @@ import pytest
 from conftest import PRODUCTS, build_zip, fixture_dir
 
 from inegi_market.cli import main
-from inegi_market.sources import zip_http
-from inegi_market.sources.zip_http import (
-    USER_AGENT,
-    ZIP_URLS,
-    HttpResponse,
-    UrllibClient,
-    check,
-    fetch,
-    load_state,
-)
+from inegi_market.sources import http_client
+from inegi_market.sources.http_client import USER_AGENT, HttpResponse, UrllibClient
+from inegi_market.sources.zip_http import ZIP_URLS, check, fetch, load_state
 from inegi_market.storage import LocalStorage
 
 NOW = datetime(2026, 10, 8, 12, 0, tzinfo=timezone.utc)
@@ -394,7 +387,7 @@ def test_cli_fetch_then_check(env_lake, caplog):
 
 
 def test_cli_fetch_exits_1_when_a_download_fails(env_lake, monkeypatch):
-    monkeypatch.setattr(zip_http.time, "sleep", lambda s: None)
+    monkeypatch.setattr(http_client.time, "sleep", lambda s: None)
     server = FakeInegi()
     server.publish("2026-09-09", SEP)
     server.script("GET", "venta", HttpResponse(403))
@@ -405,7 +398,7 @@ def test_cli_fetch_exits_1_when_a_download_fails(env_lake, monkeypatch):
 
 
 def test_cli_check_exits_1_when_the_server_cannot_be_queried(env_lake, monkeypatch):
-    monkeypatch.setattr(zip_http.time, "sleep", lambda s: None)
+    monkeypatch.setattr(http_client.time, "sleep", lambda s: None)
     server = FakeInegi()
     server.publish("2026-09-09", SEP)
     server.script("HEAD", "venta", *[OSError("sin red")] * 3)
@@ -439,7 +432,7 @@ def fake_urlopen(outcome, seen):
 def test_urllib_head_sends_user_agent_and_lowercases_headers(monkeypatch):
     seen = []
     response = FakeUrlopenResponse(b"", headers={"ETag": '"x"', "Last-Modified": "hoy"})
-    monkeypatch.setattr(zip_http.urllib.request, "urlopen", fake_urlopen(response, seen))
+    monkeypatch.setattr(http_client.urllib.request, "urlopen", fake_urlopen(response, seen))
     result = UrllibClient(timeout=7).head("https://example.org/a.zip", {"If-None-Match": '"x"'})
     assert result == HttpResponse(200, {"etag": '"x"', "last-modified": "hoy"})
     request, timeout = seen[0]
@@ -450,7 +443,7 @@ def test_urllib_head_sends_user_agent_and_lowercases_headers(monkeypatch):
 
 def test_urllib_get_streams_the_body(monkeypatch):
     response = FakeUrlopenResponse(b"PK\x03\x04zip", headers={"Content-Length": "7"})
-    monkeypatch.setattr(zip_http.urllib.request, "urlopen", fake_urlopen(response, []))
+    monkeypatch.setattr(http_client.urllib.request, "urlopen", fake_urlopen(response, []))
     dest = io.BytesIO()
     result = UrllibClient().get("https://example.org/a.zip", {}, dest)
     assert result.status == 200 and dest.getvalue() == b"PK\x03\x04zip"
@@ -459,13 +452,13 @@ def test_urllib_get_streams_the_body(monkeypatch):
 def test_urllib_http_errors_become_responses(monkeypatch):
     headers = email.message.Message()
     error = urllib.error.HTTPError("https://example.org/a.zip", 403, "Forbidden", headers, None)
-    monkeypatch.setattr(zip_http.urllib.request, "urlopen", fake_urlopen(error, []))
+    monkeypatch.setattr(http_client.urllib.request, "urlopen", fake_urlopen(error, []))
     assert UrllibClient().head("https://example.org/a.zip", {}).status == 403
     assert UrllibClient().get("https://example.org/a.zip", {}, io.BytesIO()).status == 403
 
 
 def test_urllib_network_errors_are_raised_as_oserror(monkeypatch):
     error = urllib.error.URLError("sin DNS")
-    monkeypatch.setattr(zip_http.urllib.request, "urlopen", fake_urlopen(error, []))
+    monkeypatch.setattr(http_client.urllib.request, "urlopen", fake_urlopen(error, []))
     with pytest.raises(OSError):
         UrllibClient().head("https://example.org/a.zip", {})
