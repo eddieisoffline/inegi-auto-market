@@ -7,6 +7,7 @@ from collections import Counter
 
 from .config import Settings
 from .curate import SPECS, CurateError, curate_all
+from .diff import DiffError, diff_latest
 from .fx import update_fx
 from .ingest import IngestError, find_zips, ingest_file
 from .reconcile import ReconciliationError, reconcile
@@ -75,6 +76,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     sub.add_parser("fx", help="descarga el tipo de cambio FIX de Banxico a raw y curated")
+
+    p_diff = sub.add_parser("diff", help="compara dos fotos curated y clasifica cada cambio")
+    p_diff.add_argument(
+        "--product", dest="products", action="append", choices=sorted(SPECS),
+        help="solo este producto; se puede repetir (por defecto: todos)",
+    )
+    p_diff.add_argument("--before", metavar="AAAA-MM-DD",
+                        help="foto anterior (por defecto: la penúltima de cada producto)")
+    p_diff.add_argument("--after", metavar="AAAA-MM-DD",
+                        help="foto posterior (por defecto: la más reciente de cada producto)")
     return parser
 
 
@@ -111,6 +122,14 @@ def main(argv: list[str] | None = None, client: HttpClient | None = None) -> Non
             log.error("curated detenido: %s", exc)
             raise SystemExit(1) from None
         log.info("curate: %d fotos, %d filas", len(results), sum(r.rows_written for r in results))
+        return
+
+    if args.command == "diff":
+        try:
+            diff_latest(storage, args.products, args.before, args.after)
+        except DiffError as exc:
+            log.error("diff detenido: %s", exc)
+            raise SystemExit(1) from None
         return
 
     client = client or UrllibClient()

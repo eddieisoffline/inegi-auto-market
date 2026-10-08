@@ -103,3 +103,21 @@ def complete_hybrid_files(end=(2026, 9), entities=("01", "09"), skip=()):
         name = f"conjunto_de_datos/raiavl_hibrido_mensual_tr_cifra_{year}.csv"
         files[name] = (CRLF.join(lines) + CRLF).encode("utf-8")
     return files
+
+
+def curated_lake(storage=None, products=PRODUCTS, snapshots=SNAPSHOTS):
+    """Lake con las fotos de los fixtures ingeridas y curadas.
+
+    Los fixtures traen solo algunos meses a propósito, así que la curación se hace con la
+    continuidad apagada; la continuidad se prueba aparte con complete_hybrid_files.
+    """
+    from inegi_market.curate import curate_all
+    from inegi_market.ingest import ingest_zip
+    from inegi_market.validate import ContractConfig
+
+    storage = storage if storage is not None else MemoryStorage()
+    for snapshot in snapshots:
+        for product in products:
+            ingest_zip(build_zip(fixture_dir(snapshot, product)), f"{product}.zip", storage)
+    curate_all(storage, list(products), config=ContractConfig(check_continuity=False))
+    return storage

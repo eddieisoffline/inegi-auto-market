@@ -30,7 +30,7 @@ Proyecto en construcción. Esta página se actualiza en cada iteración y solo d
 | Capa curated en Parquet (tipos, normalización, duplicados) | Hecho |
 | Contratos de datos que detienen un lote defectuoso | Hecho |
 | Conciliación contra la API del INEGI y tipo de cambio de Banxico | Hecho |
-| Comparación entre publicaciones (qué se revisó y por qué) | Pendiente |
+| Comparación entre publicaciones (qué se revisó y por qué) | Hecho |
 | Warehouse en BigQuery y marts | Pendiente |
 | Pronóstico con backtesting contra baseline | Pendiente |
 | Dashboard | Pendiente |
@@ -56,13 +56,14 @@ Hoy existen la detección y descarga de publicaciones nuevas, la capa `raw` y la
 - **Contratos de datos:** antes de escribir cada foto en curated se revisan columnas, tipos, claves, estatus, continuidad de los meses contra el periodo que declara el propio INEGI, códigos contra sus catálogos y que no desaparezca una marca grande de ventas. Un error detiene el lote sin escribir nada; las advertencias quedan registradas. Para calibrar los umbrales, las reglas se aplicaron como si cada mes desde 2006 hubiera sido el último publicado: en 249 meses de ventas habrían frenado un solo lote (abril de 2025, cuando Chirey, con 1.24 % del mercado, dejó de reportar), y en exportación habrían dejado dos advertencias. Las dos publicaciones reales pasan sin advertencias.
 - **Conciliación contra la API del INEGI:** los totales mensuales de curated se comparan con los totales nacionales del Banco de Indicadores, con tolerancia cero en producción y exportación y de ±0.01 % en ventas; el resultado de cada mes queda guardado. Contra la API real, los 261 meses de la publicación de octubre (2005-01 a 2026-09) cuadran exacto en los tres productos. En la de septiembre, la única diferencia en toda la historia es agosto de 2026 en ventas: 1 unidad (0.0008 %), una revisión que la API ya traía.
 - **Tipo de cambio:** la serie FIX de Banxico desde 2005 (5,477 días) se guarda por día y, por mes, como promedio y como dato del último día hábil.
-- **Pruebas sin red:** 194 pruebas corren en GitHub Actions en cada push. Usan fixtures de 71 KB recortados de las publicaciones reales, sin cambiar ningún valor. Los fixtures incluyen a propósito los casos difíciles: claves duplicadas, correcciones negativas, una marca que cambia de nombre y la reclasificación de BMW. El servidor del INEGI se simula, incluidos 403, cortes de red, descargas incompletas y réplicas con cabeceras distintas.
+- **Comparación entre publicaciones:** el comando `diff` compara dos fotos al grano de marca y modelo normalizado y clasifica cada cambio como mes nuevo, reclasificación (las unidades se mueven sin cambiar el total), revisión real (cambia el total) o cambio de estatus. Entre septiembre y octubre de 2026 encuentra la reclasificación de BMW, una sola revisión real en toda la historia (−1 unidad) y, en híbridos, 74 unidades que pasaron de híbridas a plug-in en 23 estados sin cambiar el total. Tarda menos de 3 segundos.
+- **Pruebas sin red:** 205 pruebas corren en GitHub Actions en cada push. Usan fixtures de 71 KB recortados de las publicaciones reales, sin cambiar ningún valor. Los fixtures incluyen a propósito los casos difíciles: claves duplicadas, correcciones negativas, una marca que cambia de nombre y la reclasificación de BMW. El servidor del INEGI se simula, incluidos 403, cortes de red, descargas incompletas y réplicas con cabeceras distintas.
 
 ## Hallazgos sobre la fuente
 
-Medidos al comparar dos publicaciones reales (septiembre y octubre de 2026). El pipeline aún no los calcula de forma automática: eso llega con el diff entre publicaciones.
+Medidos al comparar dos publicaciones reales (septiembre y octubre de 2026). Las revisiones y reclasificaciones las calcula el propio pipeline con el comando `diff`.
 
-- **Las cifras se revisan entre publicaciones.** En octubre, BMW movió unidades de "Serie 2" y "Serie 3" importados a modelos nacionales nuevos ("Serie 2-", "Serie 3-") desde diciembre de 2021. Por ejemplo, en agosto de 2026 la Serie 2 importada pasó de 157 a 50 unidades y aparecieron 107 en la versión nacional. El total histórico de ventas solo cambió en 1 unidad.
+- **Las cifras se revisan entre publicaciones.** En octubre, BMW movió unidades de "Serie 2" y "Serie 3" importados a modelos nacionales nuevos ("Serie 2-", "Serie 3-") desde diciembre de 2021. Por ejemplo, en agosto de 2026 la Serie 2 importada pasó de 157 a 50 unidades y aparecieron 107 en la versión nacional. En total, 8,717 unidades de BMW cambiaron de clave en 105 combinaciones de mes y modelo, y el total histórico de ventas solo cambió en 1 unidad (BMW iX3, agosto de 2026). La misma publicación movió 1 unidad de Mini entre dos versiones del Countryman en julio de 2026.
 - **La revisión de octubre tocó solo los años 2021–2026.** En ventas, los archivos de 2005 a 2020 llegaron idénticos byte a byte.
 - **Las cifras pasan a definitivas un mes a la vez.** En octubre solo septiembre de 2023 pasó de revisadas a definitivas, en los cuatro productos. La nota oficial dice que el cambio ocurre en febrero de cada año. Hipótesis por confirmar con las siguientes publicaciones: una ventana móvil de 36 meses.
 - **El empaquetado cambia sin aviso.** Los zips de octubre llegaron sin comprimir y pesan entre 12 y 34 veces más según el producto, con las mismas columnas. Por eso la ingesta compara contenido y no solo bytes.
@@ -107,7 +108,7 @@ Work in progress. This page is updated at every iteration and only describes wha
 | Curated layer in Parquet (types, normalization, duplicates) | Done |
 | Data contracts that stop a bad batch | Done |
 | Reconciliation against the INEGI API and Banxico exchange rate | Done |
-| Comparison between releases (what was revised and why) | Pending |
+| Comparison between releases (what was revised and why) | Done |
 | BigQuery warehouse and marts | Pending |
 | Forecast with backtesting against a baseline | Pending |
 | Dashboard | Pending |
@@ -133,13 +134,14 @@ New-release detection and download, the `raw` layer, and the `curated` layer exi
 - **Data contracts:** before each snapshot is written to curated, the pipeline checks columns, types, keys, statuses, month continuity against the period INEGI itself declares, codes against their catalogs, and that no large sales brand disappears. An error stops the batch without writing anything; warnings are recorded. To calibrate the thresholds, the rules were applied as if each month since 2006 had been the latest release: across 249 months of sales they would have stopped a single batch (April 2025, when Chirey, with 1.24% of the market, stopped reporting), and in exports they would have raised two warnings. Both real releases pass with no warnings.
 - **Reconciliation against the INEGI API:** monthly totals from curated are compared with the national totals in INEGI's indicator bank, with zero tolerance for production and exports and ±0.01% for sales; every month's result is stored. Against the real API, all 261 months of the October release (2005-01 to 2026-09) match exactly for all three products. In the September release, the only difference in the whole history is August 2026 sales: 1 unit (0.0008%), a revision the API already had.
 - **Exchange rate:** Banxico's FIX series since 2005 (5,477 days) is stored daily and, per month, as the average and the last business day's rate.
-- **Offline tests:** 194 tests run on GitHub Actions on every push. They use 71 KB of fixtures cut from the real releases without changing any value. The fixtures deliberately include the hard cases: duplicate keys, negative corrections, a brand rename, and the BMW reclassification. INEGI's server is simulated, including 403s, network drops, incomplete downloads, and replicas with different headers.
+- **Comparison between releases:** the `diff` command compares two snapshots at the brand and normalized-model grain and classifies each change as a new month, a reclassification (units move without changing the total), a real revision (the total changes), or a status change. Between September and October 2026 it finds the BMW reclassification, a single real revision in the whole history (−1 unit) and, for hybrids, 74 units moved from hybrid to plug-in across 23 states with no change in the total. It takes under 3 seconds.
+- **Offline tests:** 205 tests run on GitHub Actions on every push. They use 71 KB of fixtures cut from the real releases without changing any value. The fixtures deliberately include the hard cases: duplicate keys, negative corrections, a brand rename, and the BMW reclassification. INEGI's server is simulated, including 403s, network drops, incomplete downloads, and replicas with different headers.
 
 ## Findings about the source
 
-Measured by comparing two real releases (September and October 2026). The pipeline does not compute them automatically yet; that comes with the release diff.
+Measured by comparing two real releases (September and October 2026). The revisions and reclassifications are computed by the pipeline itself with the `diff` command.
 
-- **Figures are revised between releases.** In October, BMW moved units of imported "Serie 2" and "Serie 3" to new domestic models ("Serie 2-", "Serie 3-") going back to December 2021. For example, in August 2026 the imported Serie 2 went from 157 to 50 units, and 107 appeared under the domestic version. Total historical sales changed by only 1 unit.
+- **Figures are revised between releases.** In October, BMW moved units of imported "Serie 2" and "Serie 3" to new domestic models ("Serie 2-", "Serie 3-") going back to December 2021. For example, in August 2026 the imported Serie 2 went from 157 to 50 units, and 107 appeared under the domestic version. Altogether, 8,717 BMW units changed keys across 105 month-model combinations, and total historical sales changed by only 1 unit (BMW iX3, August 2026). The same release moved 1 Mini unit between two Countryman versions in July 2026.
 - **The October revision only touched 2021–2026.** In sales, the files for 2005 to 2020 arrived byte-for-byte identical.
 - **Figures become final one month at a time.** In October only September 2023 moved from revised to final, across all four products. The official note says the change happens every February. Hypothesis to confirm with upcoming releases: a rolling 36-month window.
 - **Packaging changes without notice.** The October zips arrived uncompressed and are 12 to 34 times larger depending on the product, with the same columns. This is why ingestion compares content, not just bytes.

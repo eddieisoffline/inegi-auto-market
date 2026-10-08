@@ -23,7 +23,7 @@ cuánto las explican el tipo de cambio y otras variables? Incluye un pronóstico
 | Capa curated (Parquet) | Hecho (local) | `curate` de las dos fotos reales: 640,889 filas en 162 Parquet (4.7 MB); los totales mensuales cuadran con la suma de los CSV en las 8 fotos y con las cifras oficiales anotadas; volver a curar deja los archivos idénticos |
 | Contratos de datos | Hecho (local) | Corren dentro de `curate`: las dos fotos reales pasan sin advertencias; una foto real sin el año 2020 se detiene sin escribir nada. Repetidos sobre 249 meses de historia: 1 error (salida real de Chirey en 2025-04) y 2 advertencias |
 | Clientes de API y conciliación | Hecho (local, APIs reales) | `reconcile` contra la API del INEGI: los 261 meses (2005-01 a 2026-09) de ventas, producción y exportación de la foto 2026-10-07 cuadran exacto; en la foto 2026-09-09, la única diferencia es agosto de 2026 en ventas (+1, dentro de tolerancia). `fx`: 5,477 días de Banxico (2005-01-03 a 2026-10-08), 262 meses |
-| Diff entre fotos | Pendiente | |
+| Diff entre fotos | Hecho (local) | `diff` entre las dos fotos reales en 2.6 s: en ventas, la reclasificación de BMW (2021-12 a 2026-08, neto 0) y una sola revisión real (iX3, agosto de 2026, −1); en híbridos, 74 unidades de híbridas a plug-in en 23 entidades (febrero de 2026, neto 0) |
 | Warehouse en BigQuery y marts | Pendiente | |
 | Pronóstico con backtesting | Pendiente | |
 | Dashboard | Pendiente | |
@@ -155,6 +155,32 @@ python -m inegi_market.cli fx          # tipo de cambio FIX de Banxico a raw y c
 - **Tokens.** Solo se leen de `INEGI_TOKEN` y `BANXICO_TOKEN`. Sin token, el comando se
   detiene antes de llamar a la API. El token del INEGI va en la URL, así que la URL nunca
   se registra y el token se borra de cualquier mensaje y de la respuesta guardada en raw.
+
+## Diff entre publicaciones
+
+```bash
+python -m inegi_market.cli diff                                   # las dos fotos más recientes
+python -m inegi_market.cli diff --product venta --before 2026-09-09 --after 2026-10-07
+```
+
+Compara dos fotos curated al grano año, mes, marca y modelo normalizado (`modelo_clave`);
+en híbridos, año, mes y entidad. La clave fina (origen, segmento, país, nombre original)
+no es estable entre publicaciones, por eso no se compara a ese nivel. Cada fila que cambió
+se clasifica en:
+
+- `mes_nuevo`: el mes no existía en la foto anterior;
+- `reclasificacion`: el total de la fila no cambia y solo se movieron unidades por dentro
+  (origen, segmento, país, variante del nombre o, en híbridos, tipo de vehículo), o el
+  total cambia pero lo compensan otros modelos de la misma marca en el mismo mes;
+- `revision_real`: cambia el total de la marca en el mes (en híbridos, de la entidad);
+- `cambio_de_estatus`: registro aparte, porque puede coincidir con un cambio de valor.
+
+Salidas: `curated/snapshot_changes/` (una fila por cambio, con unidades antes y después,
+unidades movidas y el detalle de las claves finas), `curated/snapshot_summary/` (un
+renglón por tipo de cambio más `total_historia`, el efecto neto sobre los meses que ya
+estaban) y `reports/diff/`. Limitación: si una marca mueve unidades entre modelos y además
+revisa su total en el mismo mes, todas sus filas con cambio de total salen como revisión
+real; el resumen sí da el neto correcto.
 
 ## Desarrollo
 
