@@ -20,7 +20,7 @@ cuánto las explican el tipo de cambio y otras variables? Incluye un pronóstico
 | CI en GitHub Actions | Hecho | ruff y pytest en verde en cada push a `main` |
 | Ingesta de una foto a raw | Hecho (local) | `ingest` con las dos fotos reales: 8 particiones (2 por producto), bytes idénticos a los originales; la segunda ejecución no escribe nada |
 | Detector de publicación nueva y descarga | Hecho (desde la máquina del autor) | `fetch` contra el INEGI real: 4 zips descargados en 141 s, idénticos byte a byte a los bajados a mano; después, `check` y `fetch` sin descargas en ~1 s. Pendiente probarlo desde Cloud Run |
-| Capa curated (Parquet) | Pendiente | |
+| Capa curated (Parquet) | Hecho (local) | `curate` de las dos fotos reales: 640,889 filas en 162 Parquet (4.7 MB); los totales mensuales cuadran con la suma de los CSV en las 8 fotos y con las cifras oficiales anotadas; volver a curar deja los archivos idénticos |
 | Contratos de datos | Pendiente | |
 | Clientes de API y conciliación | Pendiente | |
 | Diff entre fotos | Pendiente | |
@@ -40,6 +40,11 @@ Transformaciones aplicadas a los datos del INEGI (se amplía en cada iteración)
 
 - Los zips se guardan tal como se publicaron; cada publicación se conserva como una
   foto separada, identificada por su fecha `modified`.
+- En la capa curated: se recortan espacios al inicio y al final de cada valor, se fijan
+  tipos, se agregan el modelo sin el guion final y una clave en minúsculas (el nombre
+  original se conserva), se suman las filas repetidas por clave natural (0.110 % de
+  las unidades de ventas) y se marcan las correcciones negativas. No se cambia ningún
+  valor de unidades. Detalle en [docs/reglas_curated.md](docs/reglas_curated.md).
 - Los fixtures de prueba son recortes de filas de dos publicaciones, sin cambiar
   ningún valor (ver [tests/fixtures/README.md](tests/fixtures/README.md)).
 
@@ -103,6 +108,20 @@ python -m inegi_market.cli fetch   # descarga e ingiere solo los que cambiaron
   termina con código 1 y lo dice: el zip se descarga en el navegador y se sube con
   `ingest --zip`, o se corre `fetch` desde una red donde la descarga funcione. Un
   producto que falla no detiene a los demás.
+
+## Capa curated
+
+```bash
+python -m inegi_market.cli curate                                   # todas las fotos de raw
+python -m inegi_market.cli curate --product venta --publication-date 2026-10-07
+```
+
+Convierte cada foto en Parquet tipado: `curated/<producto>/publication_date=D/anio=AAAA/`,
+con los catálogos en `curated/catalogos/` y un reporte por foto en `reports/curate/`.
+Cada fila conserva `estatus` y `publication_date`. Las filas repetidas por clave natural
+se suman (`filas_origen` dice cuántas eran), los negativos se conservan con
+`es_correccion = true` y los ceros se conservan. Columnas, claves y reglas:
+[docs/reglas_curated.md](docs/reglas_curated.md).
 
 ## Desarrollo
 

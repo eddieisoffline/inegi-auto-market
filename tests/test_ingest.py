@@ -6,7 +6,15 @@ import zipfile
 from datetime import date, datetime, timezone
 
 import pytest
-from conftest import PRODUCTS, SNAPSHOTS, build_zip, fixture_dir, fixture_files, make_zip
+from conftest import (
+    PRODUCTS,
+    SNAPSHOTS,
+    MemoryStorage,
+    build_zip,
+    fixture_dir,
+    fixture_files,
+    make_zip,
+)
 
 from inegi_market.cli import main
 from inegi_market.ingest import (
@@ -29,26 +37,6 @@ VENTA_2026 = "conjunto_de_datos/raiavl_venta_mensual_tr_cifra_2026.csv"
 
 def fixed_now():
     return NOW
-
-
-class MemoryStorage:
-    """Storage en memoria que registra cada escritura."""
-
-    def __init__(self):
-        self.files, self.writes = {}, []
-
-    def write_bytes(self, path, data):
-        self.files[path] = data
-        self.writes.append(path)
-
-    def read_bytes(self, path):
-        return self.files[path]
-
-    def exists(self, path):
-        return path in self.files
-
-    def list(self, prefix):
-        return sorted(p for p in self.files if p.startswith(prefix))
 
 
 def snapshot_zip(snapshot="2026-10-07", product="venta", compression=zipfile.ZIP_STORED):

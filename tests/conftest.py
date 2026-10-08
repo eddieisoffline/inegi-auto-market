@@ -46,3 +46,23 @@ def build_zip(src_dir: Path, compression: int = zipfile.ZIP_STORED) -> bytes:
     los construyen a partir de los fixtures.
     """
     return make_zip(tree_files(src_dir), compression)
+
+
+class MemoryStorage:
+    """Storage en memoria que registra cada escritura."""
+
+    def __init__(self):
+        self.files, self.writes = {}, []
+
+    def write_bytes(self, path, data):
+        self.files[path] = data
+        self.writes.append(path)
+
+    def read_bytes(self, path):
+        return self.files[path]
+
+    def exists(self, path):
+        return path in self.files
+
+    def list(self, prefix):
+        return sorted(p for p in self.files if p.startswith(prefix))

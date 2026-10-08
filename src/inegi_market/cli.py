@@ -6,6 +6,7 @@ import logging
 from collections import Counter
 
 from .config import Settings
+from .curate import SPECS, CurateError, curate_all
 from .ingest import IngestError, find_zips, ingest_file
 from .sources.zip_http import HttpClient, UrllibClient, check, fetch
 from .storage import Storage, get_storage
@@ -35,6 +36,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("check", help="pregunta con HEAD si el INEGI publicó algo nuevo; no descarga")
     sub.add_parser("fetch", help="descarga e ingiere los zips que cambiaron")
+
+    p_curate = sub.add_parser("curate", help="raw -> curated: Parquet tipado de cada foto de raw")
+    p_curate.add_argument(
+        "--product",
+        dest="products",
+        action="append",
+        choices=sorted(SPECS),
+        help="solo este producto; se puede repetir (por defecto: todos)",
+    )
+    p_curate.add_argument(
+        "--publication-date", metavar="AAAA-MM-DD", help="solo esta foto (por defecto: todas)"
+    )
     return parser
 
 
@@ -61,6 +74,15 @@ def main(argv: list[str] | None = None, client: HttpClient | None = None) -> Non
         except IngestError as exc:
             log.error("ingesta detenida: %s", exc)
             raise SystemExit(1) from None
+        return
+
+    if args.command == "curate":
+        try:
+            results = curate_all(storage, args.products, args.publication_date)
+        except CurateError as exc:
+            log.error("curated detenido: %s", exc)
+            raise SystemExit(1) from None
+        log.info("curate: %d fotos, %d filas", len(results), sum(r.rows_written for r in results))
         return
 
     client = client or UrllibClient()

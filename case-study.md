@@ -4,9 +4,9 @@ title:
   en: "Mexico's Auto Market with Live INEGI Data"
 slug: "inegi-auto-market"
 summary:
-  es: "Pipeline que guarda cada publicación mensual del INEGI sobre ventas, producción y exportación de vehículos ligeros como una foto inmutable, para analizar marcas, estacionalidad y tipo de cambio, y medir cómo se revisan las cifras entre publicaciones. En construcción: hoy funcionan la detección de publicaciones nuevas, la descarga y la ingesta con detección de revisiones."
-  en: "Pipeline that stores every monthly INEGI release on light-vehicle sales, production, and exports as an immutable snapshot, to analyze brands, seasonality, and the exchange rate, and to measure how figures get revised between releases. Work in progress: new-release detection, download, and snapshot ingestion with revision detection are live."
-tools: ["Python", "pytest", "GitHub Actions"]
+  es: "Pipeline que guarda cada publicación mensual del INEGI sobre ventas, producción y exportación de vehículos ligeros como una foto inmutable, para analizar marcas, estacionalidad y tipo de cambio, y medir cómo se revisan las cifras entre publicaciones. En construcción: hoy funcionan la detección de publicaciones nuevas, la descarga, la ingesta con detección de revisiones y la capa curated en Parquet."
+  en: "Pipeline that stores every monthly INEGI release on light-vehicle sales, production, and exports as an immutable snapshot, to analyze brands, seasonality, and the exchange rate, and to measure how figures get revised between releases. Work in progress: new-release detection, download, snapshot ingestion with revision detection, and the curated Parquet layer are live."
+tools: ["Python", "pandas", "pyarrow", "pytest", "GitHub Actions"]
 repo_url: "https://github.com/eddieisoffline/inegi-auto-market"
 featured: false
 date: "2026-10-08"
@@ -27,7 +27,7 @@ Proyecto en construcción. Esta página se actualiza en cada iteración y solo d
 |-------|--------|
 | Ingesta de cada publicación a raw como foto inmutable | Hecho |
 | Detector de publicación nueva y descarga automática | Hecho |
-| Capa curated en Parquet (tipos, normalización, duplicados) | Pendiente |
+| Capa curated en Parquet (tipos, normalización, duplicados) | Hecho |
 | Contratos de datos que detienen un lote defectuoso | Pendiente |
 | Conciliación contra la API del INEGI y tipo de cambio de Banxico | Pendiente |
 | Comparación entre publicaciones (qué se revisó y por qué) | Pendiente |
@@ -43,7 +43,7 @@ INEGI (4 zips mensuales) ─► raw/ (una foto por publicación) ─► curated/
 API del INEGI + Banxico ─► conciliación y tipo de cambio ──────────┘
 ```
 
-Hoy existen la detección y descarga de publicaciones nuevas y la capa `raw`. Cada publicación se guarda tal como llegó, en `raw/raiavl/<producto>/publication_date=AAAA-MM-DD/`, junto con una copia del metadato y un manifiesto. El manifiesto incluye el sha256 del zip y el de cada archivo que contiene.
+Hoy existen la detección y descarga de publicaciones nuevas, la capa `raw` y la capa `curated`. Cada publicación se guarda tal como llegó, en `raw/raiavl/<producto>/publication_date=AAAA-MM-DD/`, junto con una copia del metadato y un manifiesto. El manifiesto incluye el sha256 del zip y el de cada archivo que contiene. Después, cada foto se convierte en Parquet tipado, un archivo por año, en `curated/<producto>/publication_date=AAAA-MM-DD/`.
 
 ## Lo que ya funciona
 
@@ -52,7 +52,8 @@ Hoy existen la detección y descarga de publicaciones nuevas y la capa `raw`. Ca
 - **Nunca se sobrescribe una foto.** Si llega otro zip con la misma fecha de publicación, se comparan los archivos por dentro:
   - si es el mismo contenido con otro empaquetado, no se escribe nada y se avisa;
   - si es una corrección silenciosa, la ingesta se detiene y lista los archivos que cambiaron.
-- **Pruebas sin red:** 101 pruebas corren en GitHub Actions en cada push. Usan fixtures de 71 KB recortados de las publicaciones reales, sin cambiar ningún valor. Los fixtures incluyen a propósito los casos difíciles: claves duplicadas, correcciones negativas, una marca que cambia de nombre y la reclasificación de BMW. El servidor del INEGI se simula, incluidos 403, cortes de red, descargas incompletas y réplicas con cabeceras distintas.
+- **Capa curated:** cada foto se convierte en Parquet tipado. Se recortan espacios, se agregan el modelo sin el guion final y una clave en minúsculas, y se suman las filas que la fuente repite; cada fila conserva su estatus y la fecha de la publicación. Las dos publicaciones reales dan 640,889 filas en 162 archivos (4.7 MB). Los totales mensuales cuadran con la suma directa de los CSV en todos los meses de las 8 fotos, y con las cifras oficiales anotadas (por ejemplo, ventas de septiembre de 2026: 129,274). Volver a curar tarda 7.6 s y deja los archivos idénticos byte a byte.
+- **Pruebas sin red:** 131 pruebas corren en GitHub Actions en cada push. Usan fixtures de 71 KB recortados de las publicaciones reales, sin cambiar ningún valor. Los fixtures incluyen a propósito los casos difíciles: claves duplicadas, correcciones negativas, una marca que cambia de nombre y la reclasificación de BMW. El servidor del INEGI se simula, incluidos 403, cortes de red, descargas incompletas y réplicas con cabeceras distintas.
 
 ## Hallazgos sobre la fuente
 
@@ -69,19 +70,20 @@ Medidos al comparar dos publicaciones reales (septiembre y octubre de 2026). El 
 
 - **Cada publicación es una foto inmutable**, identificada por la fecha `modified` de sus metadatos. El historial de revisiones solo existe desde la primera foto guardada, y no se simulan revisiones pasadas.
 - **Se distingue un reempaquetado de una corrección real:** la comparación es por archivo, así que regenerar el zip con los mismos datos no detiene el pipeline, pero una corrección silenciosa sí.
+- **Los duplicados se suman por el nombre original del modelo.** En la fuente conviven, en el mismo mes y con el mismo origen, nombres con y sin guion final (por ejemplo, "Tacoma" y "Tacoma-"). Si la suma usara el nombre normalizado, se fusionarían 113 claves de ventas que el INEGI reporta por separado. El nombre normalizado queda como columna aparte para agregar después.
 - **Detectar sin descargar y sin confiar en un solo dato:** el HEAD decide con `Last-Modified` y una tolerancia, y si aun así se descarga una versión que ya estaba, la ingesta la reconoce por sha256 y no escribe nada. El estado de lo descargado solo se actualiza después de ingerir, así que una falla se reintenta en la siguiente ejecución.
 - **El mismo código corre en local y en la nube:** el almacenamiento tiene una interfaz común (`LocalStorage` / `GCSStorage`).
 - **Sin credenciales en el repositorio:** los tokens del INEGI y de Banxico solo viven en variables de entorno o en Secret Manager.
 
 ## Stack
 
-Hoy: Python (biblioteca estándar), pytest, ruff, GitHub Actions. Planeado: pandas y pyarrow, SQL en BigQuery, Cloud Storage, Cloud Run Jobs, Cloud Scheduler, Terraform y un dashboard en Looker Studio.
+Hoy: Python (pandas, pyarrow), Parquet, pytest, ruff, GitHub Actions. Planeado: SQL en BigQuery, Cloud Storage, Cloud Run Jobs, Cloud Scheduler, Terraform y un dashboard en Looker Studio.
 
 ## Datos
 
-Fuente: INEGI, Registro Administrativo de la Industria Automotriz de Vehículos Ligeros (RAIAVL), [datos abiertos](https://www.inegi.org.mx/datosprimarios/iavl/) usados bajo los [términos de libre uso del INEGI](https://www.inegi.org.mx/inegi/terminos.html). Este proyecto es independiente: el INEGI no lo respalda ni lo revisa. Hasta ahora no se ha transformado ningún valor; los zips se guardan tal como se publicaron. El tipo de cambio vendrá del Sistema de Información Económica (SIE) de Banxico, serie SF43718.
+Fuente: INEGI, Registro Administrativo de la Industria Automotriz de Vehículos Ligeros (RAIAVL), [datos abiertos](https://www.inegi.org.mx/datosprimarios/iavl/) usados bajo los [términos de libre uso del INEGI](https://www.inegi.org.mx/inegi/terminos.html). Este proyecto es independiente: el INEGI no lo respalda ni lo revisa. La capa raw guarda los zips tal como se publicaron. La capa curated fija tipos, recorta espacios, agrega el modelo normalizado y suma las filas repetidas (0.110 % de las unidades de ventas); no cambia ningún valor de unidades. El tipo de cambio vendrá del Sistema de Información Económica (SIE) de Banxico, serie SF43718.
 
-Documentación técnica: [README del repositorio](https://github.com/eddieisoffline/inegi-auto-market/blob/main/README.md) y [fixtures de prueba y sus casos](https://github.com/eddieisoffline/inegi-auto-market/blob/main/tests/fixtures/README.md).
+Documentación técnica: [README del repositorio](https://github.com/eddieisoffline/inegi-auto-market/blob/main/README.md), [reglas de la capa curated](https://github.com/eddieisoffline/inegi-auto-market/blob/main/docs/reglas_curated.md) y [fixtures de prueba y sus casos](https://github.com/eddieisoffline/inegi-auto-market/blob/main/tests/fixtures/README.md).
 :::
 
 :::en
@@ -99,7 +101,7 @@ Work in progress. This page is updated at every iteration and only describes wha
 |-------|--------|
 | Ingestion of each release into raw as an immutable snapshot | Done |
 | New-release detector and automatic download | Done |
-| Curated layer in Parquet (types, normalization, duplicates) | Pending |
+| Curated layer in Parquet (types, normalization, duplicates) | Done |
 | Data contracts that stop a bad batch | Pending |
 | Reconciliation against the INEGI API and Banxico exchange rate | Pending |
 | Comparison between releases (what was revised and why) | Pending |
@@ -115,7 +117,7 @@ INEGI (4 monthly zips) ─► raw/ (one snapshot per release) ─► curated/ (P
 INEGI API + Banxico ─► reconciliation and exchange rate ──────────┘
 ```
 
-New-release detection and download and the `raw` layer exist today. Each release is stored exactly as it arrived, in `raw/raiavl/<product>/publication_date=YYYY-MM-DD/`, together with a copy of its metadata file and a manifest. The manifest includes the sha256 of the zip and of every file inside it.
+New-release detection and download, the `raw` layer, and the `curated` layer exist today. Each release is stored exactly as it arrived, in `raw/raiavl/<product>/publication_date=YYYY-MM-DD/`, together with a copy of its metadata file and a manifest. The manifest includes the sha256 of the zip and of every file inside it. Each snapshot is then converted into typed Parquet, one file per year, in `curated/<product>/publication_date=YYYY-MM-DD/`.
 
 ## What works today
 
@@ -124,7 +126,8 @@ New-release detection and download and the `raw` layer exist today. Each release
 - **A snapshot is never overwritten.** If another zip arrives with the same release date, the files inside are compared:
   - if it is the same content with different packaging, nothing is written and a warning is logged;
   - if it is a silent correction, ingestion stops and lists the files that changed.
-- **Offline tests:** 101 tests run on GitHub Actions on every push. They use 71 KB of fixtures cut from the real releases without changing any value. The fixtures deliberately include the hard cases: duplicate keys, negative corrections, a brand rename, and the BMW reclassification. INEGI's server is simulated, including 403s, network drops, incomplete downloads, and replicas with different headers.
+- **Curated layer:** each snapshot becomes typed Parquet. Whitespace is trimmed, a model name without the trailing hyphen and a lowercase join key are added, and rows the source repeats are summed; every row keeps its status and release date. The two real releases produce 640,889 rows in 162 files (4.7 MB). Monthly totals match the direct sum of the CSVs in every month of all 8 snapshots, and the official figures on record (for example, September 2026 sales: 129,274). Re-curating takes 7.6 s and leaves the files byte-for-byte identical.
+- **Offline tests:** 131 tests run on GitHub Actions on every push. They use 71 KB of fixtures cut from the real releases without changing any value. The fixtures deliberately include the hard cases: duplicate keys, negative corrections, a brand rename, and the BMW reclassification. INEGI's server is simulated, including 403s, network drops, incomplete downloads, and replicas with different headers.
 
 ## Findings about the source
 
@@ -141,17 +144,18 @@ Measured by comparing two real releases (September and October 2026). The pipeli
 
 - **Each release is an immutable snapshot**, identified by the `modified` date in its metadata. Revision history only exists from the first stored snapshot, and past revisions are not simulated.
 - **Repackaging is told apart from a real correction:** the comparison is per file, so a zip regenerated with the same data does not stop the pipeline, but a silent correction does.
+- **Duplicates are summed by the original model name.** In the source, names with and without a trailing hyphen coexist in the same month and origin (for example, "Tacoma" and "Tacoma-"). Summing by the normalized name would merge 113 sales keys that INEGI reports separately. The normalized name is kept as a separate column for later aggregation.
 - **Detect without downloading, and without trusting a single signal:** the HEAD request decides by `Last-Modified` with a tolerance, and if a version that was already stored is downloaded anyway, ingestion recognizes it by sha256 and writes nothing. The record of what was downloaded is only updated after ingestion, so a failure is retried on the next run.
 - **The same code runs locally and in the cloud:** storage sits behind a common interface (`LocalStorage` / `GCSStorage`).
 - **No credentials in the repository:** INEGI and Banxico tokens only live in environment variables or Secret Manager.
 
 ## Stack
 
-Today: Python (standard library), pytest, ruff, GitHub Actions. Planned: pandas and pyarrow, SQL on BigQuery, Cloud Storage, Cloud Run Jobs, Cloud Scheduler, Terraform, and a Looker Studio dashboard.
+Today: Python (pandas, pyarrow), Parquet, pytest, ruff, GitHub Actions. Planned: SQL on BigQuery, Cloud Storage, Cloud Run Jobs, Cloud Scheduler, Terraform, and a Looker Studio dashboard.
 
 ## Data
 
-Source: INEGI, Registro Administrativo de la Industria Automotriz de Vehículos Ligeros (RAIAVL), [open data](https://www.inegi.org.mx/datosprimarios/iavl/) used under [INEGI's free-use terms](https://www.inegi.org.mx/inegi/terminos.html). This is an independent project: INEGI does not endorse or review it. No values have been transformed so far; the zips are stored exactly as published. The exchange rate will come from Banxico's Economic Information System (SIE), series SF43718.
+Source: INEGI, Registro Administrativo de la Industria Automotriz de Vehículos Ligeros (RAIAVL), [open data](https://www.inegi.org.mx/datosprimarios/iavl/) used under [INEGI's free-use terms](https://www.inegi.org.mx/inegi/terminos.html). This is an independent project: INEGI does not endorse or review it. The raw layer stores the zips exactly as published. The curated layer sets types, trims whitespace, adds the normalized model, and sums repeated rows (0.110% of sales units); it does not change any unit value. The exchange rate will come from Banxico's Economic Information System (SIE), series SF43718.
 
-Technical documentation (in Spanish): [repository README](https://github.com/eddieisoffline/inegi-auto-market/blob/main/README.md) and [test fixtures and their cases](https://github.com/eddieisoffline/inegi-auto-market/blob/main/tests/fixtures/README.md).
+Technical documentation (in Spanish): [repository README](https://github.com/eddieisoffline/inegi-auto-market/blob/main/README.md), [curated layer rules](https://github.com/eddieisoffline/inegi-auto-market/blob/main/docs/reglas_curated.md), and [test fixtures and their cases](https://github.com/eddieisoffline/inegi-auto-market/blob/main/tests/fixtures/README.md).
 :::
