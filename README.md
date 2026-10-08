@@ -21,7 +21,7 @@ cuánto las explican el tipo de cambio y otras variables? Incluye un pronóstico
 | Ingesta de una foto a raw | Hecho (local) | `ingest` con las dos fotos reales: 8 particiones (2 por producto), bytes idénticos a los originales; la segunda ejecución no escribe nada |
 | Detector de publicación nueva y descarga | Hecho (desde la máquina del autor) | `fetch` contra el INEGI real: 4 zips descargados en 141 s, idénticos byte a byte a los bajados a mano; después, `check` y `fetch` sin descargas en ~1 s. Pendiente probarlo desde Cloud Run |
 | Capa curated (Parquet) | Hecho (local) | `curate` de las dos fotos reales: 640,889 filas en 162 Parquet (4.7 MB); los totales mensuales cuadran con la suma de los CSV en las 8 fotos y con las cifras oficiales anotadas; volver a curar deja los archivos idénticos |
-| Contratos de datos | Pendiente | |
+| Contratos de datos | Hecho (local) | Corren dentro de `curate`: las dos fotos reales pasan sin advertencias; una foto real sin el año 2020 se detiene sin escribir nada. Repetidos sobre 249 meses de historia: 1 error (salida real de Chirey en 2025-04) y 2 advertencias |
 | Clientes de API y conciliación | Pendiente | |
 | Diff entre fotos | Pendiente | |
 | Warehouse en BigQuery y marts | Pendiente | |
@@ -122,6 +122,14 @@ Cada fila conserva `estatus` y `publication_date`. Las filas repetidas por clave
 se suman (`filas_origen` dice cuántas eran), los negativos se conservan con
 `es_correccion = true` y los ceros se conservan. Columnas, claves y reglas:
 [docs/reglas_curated.md](docs/reglas_curated.md).
+
+Antes de escribir, los **contratos de datos** revisan la foto: columnas y tipos, claves
+sin valor o repetidas, mes 1–12, estatus permitidos, continuidad contra el periodo que
+declara el metadato, códigos que existan en los catálogos y que no desaparezca una marca
+grande de ventas. Un error detiene el lote sin escribir nada; las advertencias (caída de
+marcas con ventas, muchas correcciones negativas, secuencia de estatus inesperada) quedan
+en el log y en el reporte. Si una marca grande dejó de vender de verdad, se reconoce con
+`curate --acknowledge-exit MARCA`. Reglas y calibración: [docs/contratos.md](docs/contratos.md).
 
 ## Desarrollo
 

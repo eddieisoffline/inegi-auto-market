@@ -10,6 +10,7 @@ from .curate import SPECS, CurateError, curate_all
 from .ingest import IngestError, find_zips, ingest_file
 from .sources.zip_http import HttpClient, UrllibClient, check, fetch
 from .storage import Storage, get_storage
+from .validate import ContractConfig, ValidationError
 
 log = logging.getLogger(__name__)
 
@@ -48,6 +49,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_curate.add_argument(
         "--publication-date", metavar="AAAA-MM-DD", help="solo esta foto (por defecto: todas)"
     )
+    p_curate.add_argument(
+        "--acknowledge-exit",
+        dest="acknowledged_exits",
+        action="append",
+        default=[],
+        metavar="MARCA",
+        help="marca grande que dejó de vender y ya se revisó; se puede repetir",
+    )
     return parser
 
 
@@ -78,8 +87,9 @@ def main(argv: list[str] | None = None, client: HttpClient | None = None) -> Non
 
     if args.command == "curate":
         try:
-            results = curate_all(storage, args.products, args.publication_date)
-        except CurateError as exc:
+            config = ContractConfig(acknowledged_exits=frozenset(args.acknowledged_exits))
+            results = curate_all(storage, args.products, args.publication_date, config)
+        except (CurateError, ValidationError) as exc:
             log.error("curated detenido: %s", exc)
             raise SystemExit(1) from None
         log.info("curate: %d fotos, %d filas", len(results), sum(r.rows_written for r in results))

@@ -7,7 +7,8 @@
 
 Bajo curated/<producto>/ solo hay Parquet de hechos, para que el warehouse pueda
 leerlo con un comodín. Las reglas están en docs/reglas_curated.md. Cada ejecución
-reescribe sus archivos con el mismo contenido, así que es idempotente.
+reescribe sus archivos con el mismo contenido, así que es idempotente. Antes de escribir,
+los contratos de validate.py revisan la foto: con un error no se escribe nada.
 """
 from __future__ import annotations
 
@@ -17,6 +18,7 @@ import logging
 import re
 import zipfile
 from dataclasses import dataclass
+from datetime import date
 
 import pandas as pd
 import pyarrow as pa
@@ -24,6 +26,7 @@ import pyarrow.parquet as pq
 
 from .ingest import RAW_PREFIX
 from .storage import Storage
+from .validate import ContractConfig, ensure_valid, validate_curated
 
 log = logging.getLogger(__name__)
 
@@ -247,14 +250,21 @@ def build_catalogs(zf: zipfile.ZipFile, publication_date: str) -> dict[str, pd.D
     return dims
 
 
-def curate_photo(storage: Storage, product: str, publication_date: str) -> CurateResult:
-    """raw -> curated para una foto (producto y fecha de publicación)."""
+def curate_photo(
+    storage: Storage, product: str, publication_date: str, config: ContractConfig | None = None
+) -> CurateResult:
+    """raw -> curated para una foto (producto y fecha de publicación), si pasa los contratos."""
     if product not in SPECS:
         raise CurateError(f"producto desconocido: {product!r}")
     manifest, data = _read_photo(storage, product, publication_date)
     with zipfile.ZipFile(io.BytesIO(data)) as zf:
         facts, report = build_facts(zf, product, publication_date)
         dims = build_catalogs(zf, publication_date)
+
+    # El periodo que declara el metadato (`temporal`) es el que debe venir completo.
+    first, last = (date.fromisoformat(manifest[k]) for k in ("temporal_start", "temporal_end"))
+    issues = validate_curated(facts, product, dims, first, last, config)
+    warnings = ensure_valid(issues, f"{product} {publication_date}")
 
     files = []
     for year, part in facts.groupby("anio", sort=True):
@@ -268,7 +278,8 @@ def curate_photo(storage: Storage, product: str, publication_date: str) -> Curat
         files.append(path)
 
     report = {"product": product, "publication_date": publication_date,
-              "raw_sha256": manifest["sha256"], **report, "files": files}
+              "raw_sha256": manifest["sha256"], **report,
+              "contract_warnings": [str(w) for w in warnings], "files": files}
     body = json.dumps(report, ensure_ascii=False, indent=2) + "\n"
     storage.write_bytes(f"{REPORT_PREFIX}/{product}/publication_date={publication_date}.json",
                         body.encode("utf-8"))
@@ -294,7 +305,10 @@ def raw_photos(storage: Storage) -> list[tuple[str, str]]:
 
 
 def curate_all(
-    storage: Storage, products: list[str] | None = None, publication_date: str | None = None
+    storage: Storage,
+    products: list[str] | None = None,
+    publication_date: str | None = None,
+    config: ContractConfig | None = None,
 ) -> list[CurateResult]:
     """Cura todas las fotos de raw que cumplan los filtros. Falla si no hay ninguna."""
     photos = [
@@ -303,4 +317,4 @@ def curate_all(
     ]
     if not photos:
         raise CurateError("no hay fotos en raw que cumplan los filtros")
-    return [curate_photo(storage, p, d) for p, d in photos]
+    return [curate_photo(storage, p, d, config) for p, d in photos]

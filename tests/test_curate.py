@@ -11,6 +11,7 @@ from conftest import (
     SNAPSHOTS,
     MemoryStorage,
     build_zip,
+    complete_hybrid_files,
     fixture_dir,
     fixture_files,
     make_zip,
@@ -20,6 +21,7 @@ from inegi_market.cli import main
 from inegi_market.curate import CurateError, curate_all, curate_photo, model_key, normalize_model
 from inegi_market.ingest import ingest_zip
 from inegi_market.storage import LocalStorage
+from inegi_market.validate import ContractConfig, ValidationError
 
 UNITS = {
     "venta": ["UNI_VEH"],
@@ -33,6 +35,9 @@ CURATED_UNITS = {
     "exportacion": ["unidades"],
     "hibrido": ["veh_electricos", "veh_hibridos_plugin", "veh_hibridos"],
 }
+# Los fixtures traen solo algunos meses a propósito: la continuidad se prueba aparte, con una
+# foto completa (complete_hybrid_files) y en test_validate.py.
+SAMPLE = ContractConfig(check_continuity=False)
 VENTA_2017 = "conjunto_de_datos/raiavl_venta_mensual_tr_cifra_2017.csv"
 VENTA_2026 = "conjunto_de_datos/raiavl_venta_mensual_tr_cifra_2026.csv"
 IX3_UNITS = b',29,"Cifras Revisadas"'  # iX3, agosto de 2026, en la foto 2026-10-07
@@ -76,7 +81,7 @@ def source_monthly_totals(snapshot, product):
 @pytest.fixture(scope="module")
 def lake():
     storage = lake_with()
-    curate_all(storage)
+    curate_all(storage, config=SAMPLE)
     return storage
 
 
@@ -133,9 +138,9 @@ def test_partition_layout(lake):
 
 def test_curate_is_idempotent():
     storage = lake_with(snapshots=["2026-10-07"], products=["venta"])
-    curate_photo(storage, "venta", "2026-10-07")
+    curate_photo(storage, "venta", "2026-10-07", SAMPLE)
     first = {p: storage.files[p] for p in storage.list("curated/")}
-    curate_photo(storage, "venta", "2026-10-07")
+    curate_photo(storage, "venta", "2026-10-07", SAMPLE)
     assert {p: storage.files[p] for p in storage.list("curated/")} == first
 
 
@@ -188,7 +193,7 @@ def test_hyphen_variant_in_the_same_month_is_not_merged():
     line = next(ln for ln in files[VENTA_2026].split(b"\r\n") if b'"iX3"' in ln and b'"08"' in ln)
     files[VENTA_2026] += line.replace(b'"iX3"', b'"iX3-"') + b"\r\n"
     storage = lake_with_files(files)
-    curate_photo(storage, "venta", "2026-10-07")
+    curate_photo(storage, "venta", "2026-10-07", SAMPLE)
     ix3 = curated(storage, "venta").query("modelo_clave == 'ix3' and anio == 2026 and mes == 8")
     assert sorted(ix3["modelo_origen"]) == ["iX3", "iX3-"]
     assert ix3["filas_origen"].tolist() == [1, 1]
@@ -198,7 +203,7 @@ def test_whitespace_is_trimmed():
     files = fixture_files()
     files[VENTA_2026] = files[VENTA_2026].replace(b'"BMW","iX3"', b'" BMW ","  iX3 "')
     storage = lake_with_files(files)
-    curate_photo(storage, "venta", "2026-10-07")
+    curate_photo(storage, "venta", "2026-10-07", SAMPLE)
     df = curated(storage, "venta")
     assert "iX3" in set(df["modelo_origen"]) and " BMW " not in set(df["marca"])
 
@@ -263,7 +268,7 @@ def test_malformed_csv_stops_the_batch(change, message):
     files[VENTA_2026] = change(files[VENTA_2026])
     storage = lake_with_files(files)
     with pytest.raises(CurateError, match=message):
-        curate_photo(storage, "venta", "2026-10-07")
+        curate_photo(storage, "venta", "2026-10-07", SAMPLE)
     assert storage.list("curated/") == []
 
 
@@ -272,14 +277,14 @@ def test_duplicates_with_conflicting_status_stop_the_batch():
     line = next(ln for ln in files[VENTA_2017].split(b"\r\n") if b"Equinox" in ln)
     files[VENTA_2017] += line.replace(b"Cifras Definitivas", b"Cifras Revisadas") + b"\r\n"
     with pytest.raises(CurateError, match="estatus distintos"):
-        curate_photo(lake_with_files(files), "venta", "2026-10-07")
+        curate_photo(lake_with_files(files), "venta", "2026-10-07", SAMPLE)
 
 
 def test_missing_photo_and_filters():
     storage = lake_with(snapshots=["2026-09-09"], products=["hibrido", "venta"])
     with pytest.raises(CurateError, match="falta manifest.json"):
-        curate_photo(storage, "venta", "2026-10-07")
-    results = curate_all(storage, products=["hibrido"])
+        curate_photo(storage, "venta", "2026-10-07", SAMPLE)
+    results = curate_all(storage, products=["hibrido"], config=SAMPLE)
     assert [(r.product, r.publication_date) for r in results] == [("hibrido", "2026-09-09")]
     with pytest.raises(CurateError, match="no hay fotos"):
         curate_all(storage, publication_date="2030-01-01")
@@ -297,7 +302,27 @@ def test_cli_curate(tmp_path, monkeypatch, caplog):
     assert exc.value.code == 1
 
     storage = LocalStorage(str(tmp_path / "lake"))
-    ingest_zip(build_zip(fixture_dir("2026-10-07", "hibrido")), "h.zip", storage)
+    ingest_zip(make_zip(complete_hybrid_files()), "h.zip", storage)
     main(["curate", "--product", "hibrido", "--publication-date", "2026-10-07"])
-    assert storage.list("curated/hibrido/")
-    assert "curate: 1 fotos, 12 filas" in caplog.messages
+    assert len(storage.list("curated/hibrido/")) == 11  # 2016 a 2026
+    assert "curate: 1 fotos, 258 filas" in caplog.messages  # 129 meses x 2 entidades
+
+
+def test_cli_curate_stops_on_a_contract_error(tmp_path, monkeypatch, caplog):
+    monkeypatch.setenv("INEGI_MARKET_BACKEND", "local")
+    monkeypatch.setenv("INEGI_MARKET_DATA_DIR", str(tmp_path / "lake"))
+    storage = LocalStorage(str(tmp_path / "lake"))
+    ingest_zip(make_zip(complete_hybrid_files(skip=[(2020, 4)])), "h.zip", storage)
+    with pytest.raises(SystemExit) as exc:
+        main(["curate"])
+    assert exc.value.code == 1
+    assert storage.list("curated/") == []
+    assert any("faltan 1 meses" in m and "2020-04" in m for m in caplog.messages)
+
+
+def test_contract_error_writes_nothing():
+    storage = MemoryStorage()
+    ingest_zip(make_zip(complete_hybrid_files(skip=[(2026, 1)])), "h.zip", storage)
+    with pytest.raises(ValidationError, match="continuidad"):
+        curate_photo(storage, "hibrido", "2026-10-07")
+    assert storage.list("curated/") == [] and storage.list("reports/") == []

@@ -66,3 +66,40 @@ class MemoryStorage:
 
     def list(self, prefix):
         return sorted(p for p in self.files if p.startswith(prefix))
+
+
+CRLF = "\r\n"  # fin de línea de los CSV del INEGI
+HYBRID_HEADER = (
+    '"PROD_EST","COBERTURA","ANIO","ID_MES","ID_ENTIDAD","VEH_ELECTR","VEH_HIBRIDAS_PLUGIN",'
+    '"VEH_HIBRIDAS","ESTATUS"'
+)
+HYBRID_PROD_EST = (
+    "Registro Administrativo de la Industria Automotriz de Vehículos Ligeros. "
+    "Venta de vehículos híbridos y eléctricos"
+)
+
+
+def complete_hybrid_files(end=(2026, 9), entities=("01", "09"), skip=()):
+    """Foto de híbridos completa, de 2016-01 al mes `end`, con cifras sintéticas.
+
+    Los fixtures son una muestra de meses, así que no sirven para probar la continuidad.
+    Esta foto usa el metadato y los catálogos reales del fixture 2026-10-07 y genera un CSV
+    por año; los estatus siguen la ventana de 36 meses observada en las fotos reales.
+    `skip` quita meses (año, mes) para provocar huecos.
+    """
+    files = {k: v for k, v in fixture_files("2026-10-07", "hibrido").items()
+             if not k.startswith("conjunto_de_datos/")}
+    last = end[0] * 12 + end[1]
+    for year in range(2016, end[0] + 1):
+        lines = [HYBRID_HEADER]
+        for month in range(1, 13):
+            if year * 12 + month > last or (year, month) in skip:
+                continue
+            age = last - (year * 12 + month)  # meses antes del último publicado
+            status = "Cifras Definitivas" if age >= 36 else "Cifras Revisadas"
+            for entity in entities:
+                lines.append(f'"{HYBRID_PROD_EST}","Nacional",{year},"{month:02d}","{entity}",'
+                             f'1,2,3,"{status}"')
+        name = f"conjunto_de_datos/raiavl_hibrido_mensual_tr_cifra_{year}.csv"
+        files[name] = (CRLF.join(lines) + CRLF).encode("utf-8")
+    return files
