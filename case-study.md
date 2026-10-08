@@ -4,12 +4,12 @@ title:
   en: "Mexico's Auto Market with Live INEGI Data"
 slug: "inegi-auto-market"
 summary:
-  es: "Pipeline que guarda cada publicación mensual del INEGI sobre ventas, producción y exportación de vehículos ligeros como una foto inmutable, para analizar marcas, estacionalidad y tipo de cambio, y medir cómo se revisan las cifras entre publicaciones. En construcción: hoy funciona la ingesta con detección de revisiones."
-  en: "Pipeline that stores every monthly INEGI release on light-vehicle sales, production, and exports as an immutable snapshot, to analyze brands, seasonality, and the exchange rate, and to measure how figures get revised between releases. Work in progress: snapshot ingestion with revision detection is live."
+  es: "Pipeline que guarda cada publicación mensual del INEGI sobre ventas, producción y exportación de vehículos ligeros como una foto inmutable, para analizar marcas, estacionalidad y tipo de cambio, y medir cómo se revisan las cifras entre publicaciones. En construcción: hoy funcionan la detección de publicaciones nuevas, la descarga y la ingesta con detección de revisiones."
+  en: "Pipeline that stores every monthly INEGI release on light-vehicle sales, production, and exports as an immutable snapshot, to analyze brands, seasonality, and the exchange rate, and to measure how figures get revised between releases. Work in progress: new-release detection, download, and snapshot ingestion with revision detection are live."
 tools: ["Python", "pytest", "GitHub Actions"]
 repo_url: "https://github.com/eddieisoffline/inegi-auto-market"
 featured: false
-date: "2026-10-07"
+date: "2026-10-08"
 ---
 
 :::es
@@ -26,7 +26,7 @@ Proyecto en construcción. Esta página se actualiza en cada iteración y solo d
 | Etapa | Estado |
 |-------|--------|
 | Ingesta de cada publicación a raw como foto inmutable | Hecho |
-| Detector de publicación nueva y descarga automática | Pendiente |
+| Detector de publicación nueva y descarga automática | Hecho |
 | Capa curated en Parquet (tipos, normalización, duplicados) | Pendiente |
 | Contratos de datos que detienen un lote defectuoso | Pendiente |
 | Conciliación contra la API del INEGI y tipo de cambio de Banxico | Pendiente |
@@ -43,15 +43,16 @@ INEGI (4 zips mensuales) ─► raw/ (una foto por publicación) ─► curated/
 API del INEGI + Banxico ─► conciliación y tipo de cambio ──────────┘
 ```
 
-Hoy existe la capa `raw`. Cada publicación se guarda tal como llegó, en `raw/raiavl/<producto>/publication_date=AAAA-MM-DD/`, junto con una copia del metadato y un manifiesto. El manifiesto incluye el sha256 del zip y el de cada archivo que contiene.
+Hoy existen la detección y descarga de publicaciones nuevas y la capa `raw`. Cada publicación se guarda tal como llegó, en `raw/raiavl/<producto>/publication_date=AAAA-MM-DD/`, junto con una copia del metadato y un manifiesto. El manifiesto incluye el sha256 del zip y el de cada archivo que contiene.
 
 ## Lo que ya funciona
 
+- **Detección y descarga de publicaciones nuevas:** los zips tienen URL fija, así que un HEAD por producto basta para saber si cambió algo, sin descargar. Contra el servidor real del INEGI, la primera ejecución descargó los 4 zips (69 MB) en 141 s, idénticos byte a byte a los bajados a mano. Las siguientes ejecuciones no descargan nada y tardan alrededor de un segundo. Los errores de red se reintentan con espera. Si hay publicación nueva pero la descarga falla, el comando termina con error y dice cómo subir el zip a mano.
 - **Ingesta de fotos:** el producto y la fecha de publicación se leen del contenido del zip, no del nombre del archivo. Antes de guardar se verifica la integridad (CRC) y la estructura del zip. Ingerir las dos publicaciones reales (8 zips, 69 MB) tarda alrededor de un segundo, y la segunda ejecución no escribe nada.
 - **Nunca se sobrescribe una foto.** Si llega otro zip con la misma fecha de publicación, se comparan los archivos por dentro:
   - si es el mismo contenido con otro empaquetado, no se escribe nada y se avisa;
   - si es una corrección silenciosa, la ingesta se detiene y lista los archivos que cambiaron.
-- **Pruebas sin red:** 73 pruebas corren en GitHub Actions en cada push. Usan fixtures de 71 KB recortados de las publicaciones reales, sin cambiar ningún valor. Los fixtures incluyen a propósito los casos difíciles: claves duplicadas, correcciones negativas, una marca que cambia de nombre y la reclasificación de BMW.
+- **Pruebas sin red:** 101 pruebas corren en GitHub Actions en cada push. Usan fixtures de 71 KB recortados de las publicaciones reales, sin cambiar ningún valor. Los fixtures incluyen a propósito los casos difíciles: claves duplicadas, correcciones negativas, una marca que cambia de nombre y la reclasificación de BMW. El servidor del INEGI se simula, incluidos 403, cortes de red, descargas incompletas y réplicas con cabeceras distintas.
 
 ## Hallazgos sobre la fuente
 
@@ -61,12 +62,14 @@ Medidos al comparar dos publicaciones reales (septiembre y octubre de 2026). El 
 - **La revisión de octubre tocó solo los años 2021–2026.** En ventas, los archivos de 2005 a 2020 llegaron idénticos byte a byte.
 - **Las cifras pasan a definitivas un mes a la vez.** En octubre solo septiembre de 2023 pasó de revisadas a definitivas, en los cuatro productos. La nota oficial dice que el cambio ocurre en febrero de cada año. Hipótesis por confirmar con las siguientes publicaciones: una ventana móvil de 36 meses.
 - **El empaquetado cambia sin aviso.** Los zips de octubre llegaron sin comprimir y pesan entre 12 y 34 veces más según el producto, con las mismas columnas. Por eso la ingesta compara contenido y no solo bytes.
+- **El servidor tiene réplicas que no coinciden en sus cabeceras.** El mismo archivo llega con un `ETag` distinto y un `Last-Modified` que varía hasta 4 segundos según la réplica que conteste (medido el 8 de octubre de 2026). Comparar las cabeceras tal cual hacía creer que había una publicación nueva casi en cada consulta. Ahora una publicación es nueva solo si `Last-Modified` se mueve más de 10 minutos.
 - **Calidad de origen:** claves repetidas (137 en ventas, 0.11 % de las unidades), correcciones con unidades negativas (87 filas en ventas, la mayor de −791) y marcas que cambian de nombre (JETOUR pasa a "Jetour Soueast" en marzo de 2025).
 
 ## Decisiones de diseño
 
 - **Cada publicación es una foto inmutable**, identificada por la fecha `modified` de sus metadatos. El historial de revisiones solo existe desde la primera foto guardada, y no se simulan revisiones pasadas.
 - **Se distingue un reempaquetado de una corrección real:** la comparación es por archivo, así que regenerar el zip con los mismos datos no detiene el pipeline, pero una corrección silenciosa sí.
+- **Detectar sin descargar y sin confiar en un solo dato:** el HEAD decide con `Last-Modified` y una tolerancia, y si aun así se descarga una versión que ya estaba, la ingesta la reconoce por sha256 y no escribe nada. El estado de lo descargado solo se actualiza después de ingerir, así que una falla se reintenta en la siguiente ejecución.
 - **El mismo código corre en local y en la nube:** el almacenamiento tiene una interfaz común (`LocalStorage` / `GCSStorage`).
 - **Sin credenciales en el repositorio:** los tokens del INEGI y de Banxico solo viven en variables de entorno o en Secret Manager.
 
@@ -95,7 +98,7 @@ Work in progress. This page is updated at every iteration and only describes wha
 | Stage | Status |
 |-------|--------|
 | Ingestion of each release into raw as an immutable snapshot | Done |
-| New-release detector and automatic download | Pending |
+| New-release detector and automatic download | Done |
 | Curated layer in Parquet (types, normalization, duplicates) | Pending |
 | Data contracts that stop a bad batch | Pending |
 | Reconciliation against the INEGI API and Banxico exchange rate | Pending |
@@ -112,15 +115,16 @@ INEGI (4 monthly zips) ─► raw/ (one snapshot per release) ─► curated/ (P
 INEGI API + Banxico ─► reconciliation and exchange rate ──────────┘
 ```
 
-The `raw` layer exists today. Each release is stored exactly as it arrived, in `raw/raiavl/<product>/publication_date=YYYY-MM-DD/`, together with a copy of its metadata file and a manifest. The manifest includes the sha256 of the zip and of every file inside it.
+New-release detection and download and the `raw` layer exist today. Each release is stored exactly as it arrived, in `raw/raiavl/<product>/publication_date=YYYY-MM-DD/`, together with a copy of its metadata file and a manifest. The manifest includes the sha256 of the zip and of every file inside it.
 
 ## What works today
 
+- **New-release detection and download:** the zips have fixed URLs, so one HEAD request per product is enough to know whether anything changed, without downloading. Against INEGI's real server, the first run downloaded the 4 zips (69 MB) in 141 s, byte-for-byte identical to the manual downloads. Later runs download nothing and take about one second. Network errors are retried with backoff. If there is a new release but the download fails, the command exits with an error and explains how to upload the zip by hand.
 - **Snapshot ingestion:** the product and release date are read from the zip's content, not from its file name. Integrity (CRC) and structure are checked before anything is stored. Ingesting both real releases (8 zips, 69 MB) takes about one second, and a second run writes nothing.
 - **A snapshot is never overwritten.** If another zip arrives with the same release date, the files inside are compared:
   - if it is the same content with different packaging, nothing is written and a warning is logged;
   - if it is a silent correction, ingestion stops and lists the files that changed.
-- **Offline tests:** 73 tests run on GitHub Actions on every push. They use 71 KB of fixtures cut from the real releases without changing any value. The fixtures deliberately include the hard cases: duplicate keys, negative corrections, a brand rename, and the BMW reclassification.
+- **Offline tests:** 101 tests run on GitHub Actions on every push. They use 71 KB of fixtures cut from the real releases without changing any value. The fixtures deliberately include the hard cases: duplicate keys, negative corrections, a brand rename, and the BMW reclassification. INEGI's server is simulated, including 403s, network drops, incomplete downloads, and replicas with different headers.
 
 ## Findings about the source
 
@@ -130,12 +134,14 @@ Measured by comparing two real releases (September and October 2026). The pipeli
 - **The October revision only touched 2021–2026.** In sales, the files for 2005 to 2020 arrived byte-for-byte identical.
 - **Figures become final one month at a time.** In October only September 2023 moved from revised to final, across all four products. The official note says the change happens every February. Hypothesis to confirm with upcoming releases: a rolling 36-month window.
 - **Packaging changes without notice.** The October zips arrived uncompressed and are 12 to 34 times larger depending on the product, with the same columns. This is why ingestion compares content, not just bytes.
+- **The server has replicas that disagree on headers.** The same file arrives with a different `ETag` and a `Last-Modified` that varies by up to 4 seconds depending on which replica answers (measured on October 8, 2026). Comparing headers as-is made almost every check look like a new release. Now a release counts as new only if `Last-Modified` moves by more than 10 minutes.
 - **Source quality:** repeated keys (137 in sales, 0.11% of units), corrections with negative units (87 sales rows, the largest −791), and brands that change names (JETOUR becomes "Jetour Soueast" in March 2025).
 
 ## Design decisions
 
 - **Each release is an immutable snapshot**, identified by the `modified` date in its metadata. Revision history only exists from the first stored snapshot, and past revisions are not simulated.
 - **Repackaging is told apart from a real correction:** the comparison is per file, so a zip regenerated with the same data does not stop the pipeline, but a silent correction does.
+- **Detect without downloading, and without trusting a single signal:** the HEAD request decides by `Last-Modified` with a tolerance, and if a version that was already stored is downloaded anyway, ingestion recognizes it by sha256 and writes nothing. The record of what was downloaded is only updated after ingestion, so a failure is retried on the next run.
 - **The same code runs locally and in the cloud:** storage sits behind a common interface (`LocalStorage` / `GCSStorage`).
 - **No credentials in the repository:** INEGI and Banxico tokens only live in environment variables or Secret Manager.
 

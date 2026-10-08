@@ -201,6 +201,7 @@ def test_ingest_writes_zip_metadata_and_manifest(tmp_path, compression):
             name: hashlib.sha256(content).hexdigest()
             for name, content in sorted(fixture_files().items())
         },
+        "origin": {"type": "file"},
     }
 
 
@@ -272,6 +273,21 @@ def test_partial_previous_write_is_completed():
     assert result.status == "ingested"
     assert storage.exists(VENTA_PARTITION + "manifest.json")
     assert storage.read_bytes(VENTA_ZIP) == snapshot_zip()
+
+
+def test_expected_product_must_match_the_content():
+    storage = MemoryStorage()
+    with pytest.raises(IngestError, match="se esperaba un zip de 'venta'"):
+        ingest_zip(snapshot_zip(product="hibrido"), "x.zip", storage, expected_product="venta")
+    assert storage.writes == []
+
+
+def test_origin_is_recorded_in_the_manifest():
+    storage = MemoryStorage()
+    origin = {"type": "http", "url": "https://example.org/v.zip", "etag": '"abc"'}
+    result = ingest_zip(snapshot_zip(), "v.zip", storage, expected_product="venta", origin=origin)
+    manifest = json.loads(storage.read_bytes(result.partition + "manifest.json"))
+    assert manifest["origin"] == origin
 
 
 def test_rejected_zip_writes_nothing():

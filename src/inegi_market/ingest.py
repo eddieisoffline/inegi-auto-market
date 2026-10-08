@@ -200,9 +200,19 @@ def ingest_zip(
     original_name: str,
     storage: Storage,
     now: Callable[[], datetime] = _utcnow,
+    expected_product: str | None = None,
+    origin: dict[str, str] | None = None,
 ) -> IngestResult:
-    """Guarda la foto en raw/ si no existe; nunca sobrescribe una foto completa."""
+    """Guarda la foto en raw/ si no existe; nunca sobrescribe una foto completa.
+
+    `expected_product` lo usa la descarga: el zip de una URL debe ser de su producto.
+    `origin` queda en el manifiesto (de dónde vino el zip); por defecto, un archivo local.
+    """
     info = read_snapshot_info(data)
+    if expected_product is not None and info.product != expected_product:
+        raise IngestError(
+            f"se esperaba un zip de {expected_product!r} y el contenido es de {info.product!r}"
+        )
     sha256 = hashlib.sha256(data).hexdigest()
     partition = partition_path(info.product, info.modified)
     manifest_path = partition + "manifest.json"
@@ -247,6 +257,7 @@ def ingest_zip(
         "zip_name": zip_name,
         "metadata_name": metadata_file,
         "files_sha256": info.files_sha256,
+        "origin": origin or {"type": "file"},
     }
     body = json.dumps(manifest, ensure_ascii=False, indent=2) + "\n"
     storage.write_bytes(manifest_path, body.encode("utf-8"))
