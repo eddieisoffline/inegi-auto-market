@@ -15,10 +15,15 @@ dependencies = [
 [project.optional-dependencies]
 gcs = ["google-cloud-storage>=2.16"]
 bigquery = ["google-cloud-bigquery>=3.20"]
-dev = ["pytest>=8.0", "ruff>=0.6"]
+# Warehouse local: el mismo SQL de BigQuery ejecutado en DuckDB sobre el lake local.
+local = ["duckdb>=1.1", "sqlglot>=25"]
+dev = ["pytest>=8.0", "ruff>=0.6", "duckdb>=1.1", "sqlglot>=25"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+inegi_market = ["sql/*.sql", "sql/seeds/*.csv"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

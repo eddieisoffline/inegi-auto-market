@@ -6,6 +6,7 @@ __pycache__/
 # Datos locales (zips reales en data/samples/, lake local en data/lake/): nunca se suben
 data/
 *.zip
+*.duckdb
 .env
 # Guías locales para asistentes de IA: se conservan en disco, no se publican
 CLAUDE.md

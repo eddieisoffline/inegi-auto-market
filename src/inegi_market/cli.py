@@ -16,6 +16,7 @@ from .sources.inegi_api import INDICATORS, ApiError
 from .sources.zip_http import check, fetch
 from .storage import Storage, get_storage
 from .validate import ContractConfig, ValidationError
+from .warehouse import WarehouseError, build_local, run_warehouse
 
 log = logging.getLogger(__name__)
 
@@ -86,6 +87,13 @@ def build_parser() -> argparse.ArgumentParser:
                         help="foto anterior (por defecto: la penúltima de cada producto)")
     p_diff.add_argument("--after", metavar="AAAA-MM-DD",
                         help="foto posterior (por defecto: la más reciente de cada producto)")
+
+    p_wh = sub.add_parser("warehouse", help="refresca BigQuery desde curated/ (DuckDB con --local)")
+    p_wh.add_argument(
+        "--local", nargs="?", const="data/warehouse.duckdb", metavar="ARCHIVO",
+        help="construye el warehouse en DuckDB a partir del lake local "
+             "(por defecto: data/warehouse.duckdb)",
+    )
     return parser
 
 
@@ -122,6 +130,22 @@ def main(argv: list[str] | None = None, client: HttpClient | None = None) -> Non
             log.error("curated detenido: %s", exc)
             raise SystemExit(1) from None
         log.info("curate: %d fotos, %d filas", len(results), sum(r.rows_written for r in results))
+        return
+
+    if args.command == "warehouse":
+        settings = Settings.from_env()
+        try:
+            if args.local:
+                if settings.backend != "local":
+                    raise WarehouseError("--local lee el lake local: INEGI_MARKET_BACKEND=local")
+                done = build_local(settings.data_dir, args.local, storage)
+                log.info("warehouse local: %d sentencias en %s", done, args.local)
+            else:
+                done = run_warehouse(settings, storage)
+                log.info("warehouse: %d sentencias ejecutadas en BigQuery", done)
+        except WarehouseError as exc:
+            log.error("warehouse detenido: %s", exc)
+            raise SystemExit(1) from None
         return
 
     if args.command == "diff":

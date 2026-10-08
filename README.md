@@ -24,7 +24,7 @@ cuánto las explican el tipo de cambio y otras variables? Incluye un pronóstico
 | Contratos de datos | Hecho (local) | Corren dentro de `curate`: las dos fotos reales pasan sin advertencias; una foto real sin el año 2020 se detiene sin escribir nada. Repetidos sobre 249 meses de historia: 1 error (salida real de Chirey en 2025-04) y 2 advertencias |
 | Clientes de API y conciliación | Hecho (local, APIs reales) | `reconcile` contra la API del INEGI: los 261 meses (2005-01 a 2026-09) de ventas, producción y exportación de la foto 2026-10-07 cuadran exacto; en la foto 2026-09-09, la única diferencia es agosto de 2026 en ventas (+1, dentro de tolerancia). `fx`: 5,477 días de Banxico (2005-01-03 a 2026-10-08), 262 meses |
 | Diff entre fotos | Hecho (local) | `diff` entre las dos fotos reales en 2.6 s: en ventas, la reclasificación de BMW (2021-12 a 2026-08, neto 0) y una sola revisión real (iX3, agosto de 2026, −1); en híbridos, 74 unidades de híbridas a plug-in en 23 entidades (febrero de 2026, neto 0) |
-| Warehouse en BigQuery y marts | Pendiente | |
+| Warehouse en BigQuery y marts | Hecho (BigQuery y local) | Las 38 sentencias aplicadas en BigQuery desde un lake en Cloud Storage (2026-10-08): 12 tablas externas, 14 tablas (hechos particionados por mes) y 12 vistas; los marts reproducen las cifras oficiales y dan lo mismo que el warehouse local en DuckDB |
 | Pronóstico con backtesting | Pendiente | |
 | Dashboard | Pendiente | |
 | Infraestructura y despliegue | Pendiente | |
@@ -181,6 +181,23 @@ renglón por tipo de cambio más `total_historia`, el efecto neto sobre los mese
 estaban) y `reports/diff/`. Limitación: si una marca mueve unidades entre modelos y además
 revisa su total en el mismo mes, todas sus filas con cambio de total salen como revisión
 real; el resumen sí da el neto correcto.
+
+## Warehouse y marts
+
+```bash
+python -m inegi_market.cli warehouse            # BigQuery (INEGI_MARKET_BACKEND=gcs)
+python -m inegi_market.cli warehouse --local    # el mismo SQL en DuckDB: data/warehouse.duckdb
+```
+
+Tablas externas sobre `curated/`, hechos con la foto más reciente de cada producto
+(particionados por mes), dimensiones (`dim_fecha`, `dim_marca` con nombre canónico de una
+semilla versionada y vigencia medida en los datos, `dim_modelo`, `dim_pais`,
+`dim_entidad`) y 12 vistas en `raiavl_marts` para el dashboard: ventas y variaciones,
+participación por marca, estacionalidad, nacional contra importado, segmentos, tipo de
+cambio, industria, híbridos, conciliación y revisiones. Todo es `CREATE OR REPLACE`.
+`--local` traduce el SQL con sqlglot y lo ejecuta en DuckDB sobre el lake local (extra
+`local`), así el SQL se verifica con datos reales sin GCP. Detalle:
+[docs/warehouse.md](docs/warehouse.md).
 
 ## Desarrollo
 
