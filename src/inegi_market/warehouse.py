@@ -41,13 +41,17 @@ REQUIRED_PREFIXES = (
     "curated/catalogos/dim_mes/", "curated/catalogos/dim_pais_origen/",
     "curated/catalogos/dim_pais_destino/", "curated/catalogos/dim_entidad/",
     "curated/tipo_cambio_mensual/", "curated/recon/", "curated/snapshot_changes/",
-    "curated/snapshot_summary/",
+    "curated/snapshot_summary/", "curated/forecast_results/", "curated/forecast_predictions/",
+    "curated/forecast_backtest/",
 )
 REQUIRED_HINT = {
     "curated/tipo_cambio_mensual/": "fx",
     "curated/recon/": "reconcile",
     "curated/snapshot_changes/": "diff",
     "curated/snapshot_summary/": "diff",
+    "curated/forecast_results/": "forecast",
+    "curated/forecast_predictions/": "forecast",
+    "curated/forecast_backtest/": "forecast",
 }
 
 

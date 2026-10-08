@@ -5,10 +5,10 @@ dialecto BigQuery y una semilla de marcas, todo con `CREATE OR REPLACE` (idempot
 
 | Paso | Archivo | Crea |
 | --- | --- | --- |
-| 1 | [`sql/01_external_tables.sql`](../src/inegi_market/sql/01_external_tables.sql) | 12 tablas externas `raiavl_curated.ext_*` sobre el Parquet de `curated/` |
+| 1 | [`sql/01_external_tables.sql`](../src/inegi_market/sql/01_external_tables.sql) | 15 tablas externas `raiavl_curated.ext_*` sobre el Parquet de `curated/` |
 | 2 | [`sql/seeds/marcas.csv`](../src/inegi_market/sql/seeds/marcas.csv) | `raiavl_curated.seed_marca` (nombre canónico y nota de cada marca especial) |
-| 3 | [`sql/02_tables.sql`](../src/inegi_market/sql/02_tables.sql) | 8 tablas de hechos `fct_*` y 5 dimensiones `dim_*` en `raiavl_curated` |
-| 4 | [`sql/03_marts.sql`](../src/inegi_market/sql/03_marts.sql) | 12 vistas `raiavl_marts.mart_*` para el dashboard |
+| 3 | [`sql/02_tables.sql`](../src/inegi_market/sql/02_tables.sql) | 11 tablas de hechos `fct_*` y 5 dimensiones `dim_*` en `raiavl_curated` |
+| 4 | [`sql/03_marts.sql`](../src/inegi_market/sql/03_marts.sql) | 14 vistas `raiavl_marts.mart_*` para el dashboard |
 
 ## Cómo se ejecuta
 
@@ -23,15 +23,17 @@ python -m inegi_market.cli warehouse --local            # data/warehouse.duckdb
 
 Antes deben existir en el lake: curated de los cuatro productos y sus catálogos (`curate`),
 `curated/recon/` (`reconcile`), `curated/tipo_cambio_mensual/` (`fx`) y
-`curated/snapshot_changes/` y `curated/snapshot_summary/` (`diff`). Si falta alguno, el
+`curated/snapshot_changes/` y `curated/snapshot_summary/` (`diff`) y
+`curated/forecast_results/`, `forecast_predictions/` y `forecast_backtest/` (`forecast`). Si
+falta alguno, el
 comando lo dice y termina con código 1. En BigQuery, los datasets `raiavl_curated` y
 `raiavl_marts` deben existir en la misma ubicación que el bucket.
 
 ## Hechos (`raiavl_curated`)
 
 Las tablas de productos toman la **foto más reciente** de cada uno; la historia de
-revisiones está en `fct_cambios_publicacion`. Todas, salvo `fct_resumen_cambios`, están
-particionadas por mes (`DATE_TRUNC(periodo, MONTH)`).
+revisiones está en `fct_cambios_publicacion`. Todas, salvo `fct_resumen_cambios` y
+`fct_forecast_results`, están particionadas por mes.
 
 | Tabla | Grano | Notas |
 | --- | --- | --- |
@@ -43,6 +45,9 @@ particionadas por mes (`DATE_TRUNC(periodo, MONTH)`).
 | `fct_conciliacion` | producto, mes | foto más reciente de cada producto contra la API del INEGI |
 | `fct_cambios_publicacion` | par de fotos, producto, mes, marca, modelo o entidad, tipo de cambio | todas las comparaciones hechas |
 | `fct_resumen_cambios` | par de fotos, producto, tipo de cambio | incluye `total_historia` |
+| `fct_forecast_results` | serie, modelo, horizonte | métricas del backtest, ganador y mejora sobre el ingenuo estacional |
+| `fct_forecast_predictions` | serie, modelo, mes | próximos 6 meses con intervalo de 80 % |
+| `fct_forecast_backtest` | serie, modelo, origen, horizonte | cada pronóstico del backtest contra el valor real |
 
 ## Dimensiones (`raiavl_curated`)
 
@@ -78,10 +83,12 @@ Las razones van de 0 a 1. Para agregar, se suman unidades y se vuelve a dividir.
 | `mart_conciliacion` | calidad: cada mes contra la API del INEGI |
 | `mart_revisiones` | calidad: cambios entre la foto más reciente y la anterior |
 | `mart_revisiones_resumen` | calidad: resumen de esa comparación |
+| `mart_pronostico` | serie real y pronóstico de los próximos 6 meses, para graficarlos juntos |
+| `mart_pronostico_metricas` | error de cada modelo en el backtest y mejora sobre la línea base |
 
 ## Verificación (2026-10-08)
 
-- Pruebas sin red: las 38 sentencias se revisan con un cliente de BigQuery simulado
+- Pruebas sin red: todas las sentencias se revisan con un cliente de BigQuery simulado
   (orden, dependencias, particiones, marcadores resueltos) y sqlglot las lee como SQL
   válido de BigQuery. Además, el mismo SQL corre en DuckDB sobre un lake de fixtures.
 - Con las dos fotos reales, `warehouse --local` ejecuta las 38 sentencias en 1.3 s.
@@ -95,3 +102,7 @@ Las razones van de 0 a 1. Para agregar, se suman unidades y se vuelve a dividir.
   mismos resultados que DuckDB: cifras oficiales de septiembre de 2026 y mayo de 2025,
   participación que suma 1 en cada mes, índice estacional de diciembre 1.333 y de abril
   0.865, 261 meses que cuadran con la API en cada producto y la revisión del iX3 (−1).
+- **Iteración 8 (2026-10-08):** se agregaron las tablas y vistas de pronóstico (46
+  sentencias en total). En local, `warehouse --local` las ejecuta con las salidas reales
+  de `forecast`. En BigQuery hay que volver a copiar `curated/` al bucket y correr
+  `warehouse` para crearlas.

@@ -1,7 +1,9 @@
 import re
+from datetime import date
 from types import SimpleNamespace
 
 import duckdb
+import pandas as pd
 import pytest
 import sqlglot
 from api_fakes import INEGI_TOKEN, FakeApi, banxico_body, inegi_body
@@ -10,6 +12,15 @@ from conftest import MemoryStorage, curated_lake
 from inegi_market.cli import main
 from inegi_market.config import Settings
 from inegi_market.diff import diff_latest
+from inegi_market.forecast import (
+    BACKTEST_PATH,
+    BACKTEST_SCHEMA,
+    PREDICTIONS_PATH,
+    PREDICTIONS_SCHEMA,
+    RESULTS_PATH,
+    RESULTS_SCHEMA,
+)
+from inegi_market.forecast import _parquet as forecast_parquet
 from inegi_market.fx import update_fx
 from inegi_market.reconcile import curated_monthly_totals, reconcile
 from inegi_market.sources.inegi_api import INDICATORS
@@ -52,7 +63,7 @@ def kind(statement):
 
 def test_counts_and_order(statements):
     kinds = [kind(s)[0] for s in statements]
-    assert kinds == ["EXTERNAL TABLE"] * 12 + ["TABLE"] * 14 + ["VIEW"] * 12
+    assert kinds == ["EXTERNAL TABLE"] * 15 + ["TABLE"] * 17 + ["VIEW"] * 14
 
 
 def test_every_statement_is_idempotent_and_placeholders_are_resolved(statements):
@@ -80,10 +91,10 @@ def test_every_statement_parses_as_bigquery(statements):
 def test_fact_tables_are_partitioned_by_month_and_use_the_latest_photo(statements):
     facts = {kind(s)[1].split(".")[-1]: s for s in statements if "raiavl_curated.fct_" in
              kind(s)[1]}
-    assert len(facts) == 8
+    assert len(facts) == 11
     for name, statement in facts.items():
-        if name != "fct_resumen_cambios":
-            assert "PARTITION BY DATE_TRUNC(periodo, MONTH)" in statement, name
+        if name not in ("fct_resumen_cambios", "fct_forecast_results"):
+            assert "PARTITION BY DATE_TRUNC(" in statement and ", MONTH)" in statement, name
     for name in ("fct_ventas_mensual", "fct_produccion_mensual", "fct_exportacion_mensual",
                  "fct_hibridos_mensual"):
         assert "SELECT MAX(publication_date)" in facts[name], name
@@ -129,7 +140,7 @@ def test_run_warehouse_validates_the_environment():
     with pytest.raises(WarehouseError, match=r"curated/recon/ \(corre 'reconcile'\)"):
         run_warehouse(gcs, MemoryStorage(), FakeClient())
     client = FakeClient()
-    assert run_warehouse(gcs, lake_with_inputs(), client) == len(client.queries) == 38
+    assert run_warehouse(gcs, lake_with_inputs(), client) == len(client.queries) == 46
 
 
 # --- ejecución real del mismo SQL en DuckDB, con los fixtures --------------------------------
@@ -152,10 +163,33 @@ def warehouse(tmp_path_factory):
         update_fx(FakeApi({"SF43718": [(200, banxico_body(fx))]}), storage,
                   sleep=lambda s: None)
     diff_latest(storage)
+    write_forecast_outputs(storage)
     database = root / "warehouse.duckdb"
-    assert build_local(root, database, storage) == 38
+    assert build_local(root, database, storage) == 46
     with duckdb.connect(str(database), read_only=True) as con:
         yield con
+
+
+def write_forecast_outputs(storage):
+    """Salidas mínimas de `forecast`: los fixtures no tienen una serie continua que pronosticar."""
+    stamp = {"datos_hasta": date(2026, 9, 1), "fecha_ejecucion": date(2026, 10, 8)}
+    results = pd.DataFrame([{
+        "serie": "nacional", "modelo": m, "horizonte": 6, "n_pronosticos": 1, "mae": e,
+        "rmse": e, "mase": e / 10, "mape": e / 100, "mejora_mase_vs_base": 1 - e / 20,
+        "es_ganador": m == "sarima", "primer_objetivo": date(2026, 9, 1),
+        "ultimo_objetivo": date(2026, 9, 1), "ajuste_2020": True, "semilla": 1, **stamp,
+    } for m, e in (("ingenuo_estacional", 20.0), ("sarima", 5.0))])
+    predictions = pd.DataFrame([{
+        "serie": "nacional", "modelo": "sarima", "periodo": date(2026, 10, 1),
+        "pronostico": 250.0, "limite_inferior_80": 200.0, "limite_superior_80": 300.0,
+        "es_ganador": True, **stamp}])
+    backtest = pd.DataFrame([{
+        "serie": "nacional", "modelo": "sarima", "origen": date(2026, 8, 1), "h": 1,
+        "objetivo": date(2026, 9, 1), "real": 237.0, "pronostico": 240.0, "escala_mase": 10.0,
+        "datos_hasta": date(2026, 9, 1)}])
+    storage.write_bytes(RESULTS_PATH, forecast_parquet(results, RESULTS_SCHEMA))
+    storage.write_bytes(PREDICTIONS_PATH, forecast_parquet(predictions, PREDICTIONS_SCHEMA))
+    storage.write_bytes(BACKTEST_PATH, forecast_parquet(backtest, BACKTEST_SCHEMA))
 
 
 def rows(con, sql):
@@ -220,3 +254,13 @@ def test_cli_warehouse(tmp_path, monkeypatch):
     with pytest.raises(SystemExit) as exc:
         main(["warehouse", "--local", str(tmp_path / "w.duckdb")])  # lake vacío
     assert exc.value.code == 1
+
+
+def test_forecast_marts_join_actuals_and_predictions(warehouse):
+    forecast = rows(warehouse, "SELECT tipo, CAST(periodo AS VARCHAR), valor "
+                               "FROM raiavl_marts.mart_pronostico WHERE serie = 'nacional' "
+                               "AND periodo >= '2026-09-01' ORDER BY periodo")
+    assert forecast == [("real", "2026-09-01", 237.0), ("pronostico", "2026-10-01", 250.0)]
+    (winner,) = rows(warehouse, "SELECT modelo, mejora_mase_vs_base "
+                                "FROM raiavl_marts.mart_pronostico_metricas WHERE es_ganador")
+    assert winner == ("sarima", 0.75)

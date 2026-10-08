@@ -6,7 +6,7 @@ slug: "inegi-auto-market"
 summary:
   es: "Pipeline que guarda cada publicación mensual del INEGI sobre ventas, producción y exportación de vehículos ligeros como una foto inmutable, para analizar marcas, estacionalidad y tipo de cambio, y medir cómo se revisan las cifras entre publicaciones. En construcción: hoy funcionan la detección de publicaciones nuevas, la descarga, la ingesta con detección de revisiones, la capa curated en Parquet y los contratos de datos que detienen un lote defectuoso."
   en: "Pipeline that stores every monthly INEGI release on light-vehicle sales, production, and exports as an immutable snapshot, to analyze brands, seasonality, and the exchange rate, and to measure how figures get revised between releases. Work in progress: new-release detection, download, snapshot ingestion with revision detection, the curated Parquet layer, and data contracts that stop a bad batch are live."
-tools: ["Python", "pandas", "SQL", "BigQuery", "Cloud Storage", "DuckDB", "pytest", "GitHub Actions"]
+tools: ["Python", "pandas", "statsmodels", "SQL", "BigQuery", "Cloud Storage", "DuckDB", "pytest", "GitHub Actions"]
 repo_url: "https://github.com/eddieisoffline/inegi-auto-market"
 featured: false
 date: "2026-10-08"
@@ -32,7 +32,7 @@ Proyecto en construcción. Esta página se actualiza en cada iteración y solo d
 | Conciliación contra la API del INEGI y tipo de cambio de Banxico | Hecho |
 | Comparación entre publicaciones (qué se revisó y por qué) | Hecho |
 | Warehouse en BigQuery y marts | Hecho |
-| Pronóstico con backtesting contra baseline | Pendiente |
+| Pronóstico con backtesting contra baseline | Hecho |
 | Dashboard | Pendiente |
 | Ejecución programada en Google Cloud | Pendiente |
 
@@ -58,7 +58,8 @@ Hoy existen la detección y descarga de publicaciones nuevas, la capa `raw` y la
 - **Tipo de cambio:** la serie FIX de Banxico desde 2005 (5,477 días) se guarda por día y, por mes, como promedio y como dato del último día hábil.
 - **Comparación entre publicaciones:** el comando `diff` compara dos fotos al grano de marca y modelo normalizado y clasifica cada cambio como mes nuevo, reclasificación (las unidades se mueven sin cambiar el total), revisión real (cambia el total) o cambio de estatus. Entre septiembre y octubre de 2026 encuentra la reclasificación de BMW, una sola revisión real en toda la historia (−1 unidad) y, en híbridos, 74 unidades que pasaron de híbridas a plug-in en 23 estados sin cambiar el total. Tarda menos de 3 segundos.
 - **Warehouse y marts:** el modelo analítico está escrito en SQL de BigQuery (tablas externas, hechos particionados por mes, dimensiones y 12 vistas para el dashboard). Está aplicado en BigQuery sobre el lake en Cloud Storage, con los hechos particionados por mes. El mismo SQL también se traduce con sqlglot y corre en DuckDB sobre el lake local, lo que permitió verificarlo con datos reales antes de subirlo: en las dos versiones, los marts reproducen las cifras oficiales y dan exactamente lo mismo. La dimensión de marcas une a JETOUR y Jetour Soueast en una sola serie.
-- **Pruebas sin red:** 221 pruebas corren en GitHub Actions en cada push. Usan fixtures de 71 KB recortados de las publicaciones reales, sin cambiar ningún valor. Los fixtures incluyen a propósito los casos difíciles: claves duplicadas, correcciones negativas, una marca que cambia de nombre y la reclasificación de BMW. El servidor del INEGI se simula, incluidos 403, cortes de red, descargas incompletas y réplicas con cabeceras distintas.
+- **Pronóstico con backtesting:** cuatro modelos (ingenuo estacional como línea base obligatoria, ETS, SARIMA y SARIMAX con el tipo de cambio rezagado 6 meses) se evalúan con origen móvil: cada pronóstico usa solo los datos que existían en su origen, sobre los 45 meses de 2023 a septiembre de 2026. La caída de marzo a junio de 2020 se trata de forma explícita y se mide su efecto.
+- **Pruebas sin red:** 236 pruebas corren en GitHub Actions en cada push. Usan fixtures de 71 KB recortados de las publicaciones reales, sin cambiar ningún valor. Los fixtures incluyen a propósito los casos difíciles: claves duplicadas, correcciones negativas, una marca que cambia de nombre y la reclasificación de BMW. El servidor del INEGI se simula, incluidos 403, cortes de red, descargas incompletas y réplicas con cabeceras distintas.
 
 ## Hallazgos sobre la fuente
 
@@ -79,6 +80,8 @@ Primeras cifras de los marts, con la publicación de octubre de 2026 (2005-01 a 
 - **Dos de cada tres autos vendidos son importados.** En septiembre de 2026, el 67 % de las ventas fue de origen importado.
 - **Los electrificados ya son el 13 % de las ventas.** En septiembre de 2026 se vendieron 16,824 eléctricos, híbridos e híbridos plug-in de 129,274 vehículos ligeros.
 - **Nissan lidera** con 18.7 % del mercado en septiembre de 2026, seguido por General Motors (12.8 %) y Volkswagen (8.7 %).
+- **El pronóstico le gana a repetir el año anterior.** Para las ventas nacionales, SARIMA reduce el error del ingenuo estacional a la mitad a 1–3 meses (error medio de 4.5 %) y en 41 % a 1–6 meses. En las cinco marcas grandes el mejor modelo también gana, aunque no siempre es el mismo.
+- **El tipo de cambio aporta poco al pronóstico.** Rezagado 6 meses, mejora un poco a General Motors, Toyota y KIA, y empeora la serie nacional, Nissan y Volkswagen.
 
 ## Decisiones de diseño
 
@@ -91,13 +94,13 @@ Primeras cifras de los marts, con la publicación de octubre de 2026 (2005-01 a 
 
 ## Stack
 
-Hoy: Python (pandas, pyarrow), Parquet, APIs del INEGI y de Banxico, SQL en BigQuery (también en DuckDB con sqlglot), Cloud Storage, pytest, ruff, GitHub Actions. Planeado: Cloud Run Jobs, Cloud Scheduler, Terraform y un dashboard en Looker Studio.
+Hoy: Python (pandas, pyarrow, statsmodels), Parquet, APIs del INEGI y de Banxico, SQL en BigQuery (también en DuckDB con sqlglot), Cloud Storage, pytest, ruff, GitHub Actions. Planeado: Cloud Run Jobs, Cloud Scheduler, Terraform y un dashboard en Looker Studio.
 
 ## Datos
 
 Fuente: INEGI, Registro Administrativo de la Industria Automotriz de Vehículos Ligeros (RAIAVL), [datos abiertos](https://www.inegi.org.mx/datosprimarios/iavl/) usados bajo los [términos de libre uso del INEGI](https://www.inegi.org.mx/inegi/terminos.html). Este proyecto es independiente: el INEGI no lo respalda ni lo revisa. La capa raw guarda los zips tal como se publicaron. La capa curated fija tipos, recorta espacios, agrega el modelo normalizado y suma las filas repetidas (0.110 % de las unidades de ventas); no cambia ningún valor de unidades. Tipo de cambio: Banco de México, Sistema de Información Económica (SIE), serie SF43718 (FIX).
 
-Documentación técnica: [README del repositorio](https://github.com/eddieisoffline/inegi-auto-market/blob/main/README.md), [reglas de la capa curated](https://github.com/eddieisoffline/inegi-auto-market/blob/main/docs/reglas_curated.md), [contratos de datos](https://github.com/eddieisoffline/inegi-auto-market/blob/main/docs/contratos.md), [warehouse y marts](https://github.com/eddieisoffline/inegi-auto-market/blob/main/docs/warehouse.md) y [fixtures de prueba y sus casos](https://github.com/eddieisoffline/inegi-auto-market/blob/main/tests/fixtures/README.md).
+Documentación técnica: [README del repositorio](https://github.com/eddieisoffline/inegi-auto-market/blob/main/README.md), [reglas de la capa curated](https://github.com/eddieisoffline/inegi-auto-market/blob/main/docs/reglas_curated.md), [contratos de datos](https://github.com/eddieisoffline/inegi-auto-market/blob/main/docs/contratos.md), [warehouse y marts](https://github.com/eddieisoffline/inegi-auto-market/blob/main/docs/warehouse.md), [pronóstico](https://github.com/eddieisoffline/inegi-auto-market/blob/main/docs/pronostico.md) y [fixtures de prueba y sus casos](https://github.com/eddieisoffline/inegi-auto-market/blob/main/tests/fixtures/README.md).
 :::
 
 :::en
@@ -120,7 +123,7 @@ Work in progress. This page is updated at every iteration and only describes wha
 | Reconciliation against the INEGI API and Banxico exchange rate | Done |
 | Comparison between releases (what was revised and why) | Done |
 | BigQuery warehouse and marts | Done |
-| Forecast with backtesting against a baseline | Pending |
+| Forecast with backtesting against a baseline | Done |
 | Dashboard | Pending |
 | Scheduled runs on Google Cloud | Pending |
 
@@ -146,7 +149,8 @@ New-release detection and download, the `raw` layer, and the `curated` layer exi
 - **Exchange rate:** Banxico's FIX series since 2005 (5,477 days) is stored daily and, per month, as the average and the last business day's rate.
 - **Comparison between releases:** the `diff` command compares two snapshots at the brand and normalized-model grain and classifies each change as a new month, a reclassification (units move without changing the total), a real revision (the total changes), or a status change. Between September and October 2026 it finds the BMW reclassification, a single real revision in the whole history (−1 unit) and, for hybrids, 74 units moved from hybrid to plug-in across 23 states with no change in the total. It takes under 3 seconds.
 - **Warehouse and marts:** the analytical model is written in BigQuery SQL (external tables, month-partitioned facts, dimensions, and 12 views for the dashboard). It is deployed on BigQuery over the lake in Cloud Storage, with facts partitioned by month. The same SQL is also translated with sqlglot and runs on DuckDB over the local lake, which made it possible to verify it with real data before uploading: in both versions the marts reproduce the official figures and match exactly. The brand dimension joins JETOUR and Jetour Soueast into a single series.
-- **Offline tests:** 221 tests run on GitHub Actions on every push. They use 71 KB of fixtures cut from the real releases without changing any value. The fixtures deliberately include the hard cases: duplicate keys, negative corrections, a brand rename, and the BMW reclassification. INEGI's server is simulated, including 403s, network drops, incomplete downloads, and replicas with different headers.
+- **Forecast with backtesting:** four models (seasonal naive as the mandatory baseline, ETS, SARIMA, and SARIMAX with the exchange rate lagged 6 months) are evaluated with a rolling origin: every forecast only uses data that existed at its origin, over the 45 months from 2023 to September 2026. The March–June 2020 collapse is handled explicitly and its effect is measured.
+- **Offline tests:** 236 tests run on GitHub Actions on every push. They use 71 KB of fixtures cut from the real releases without changing any value. The fixtures deliberately include the hard cases: duplicate keys, negative corrections, a brand rename, and the BMW reclassification. INEGI's server is simulated, including 403s, network drops, incomplete downloads, and replicas with different headers.
 
 ## Findings about the source
 
@@ -167,6 +171,8 @@ First figures from the marts, using the October 2026 release (2005-01 to 2026-09
 - **Two out of three cars sold are imported.** In September 2026, 67% of sales were imported.
 - **Electrified vehicles are already 13% of sales.** In September 2026, 16,824 electric, hybrid, and plug-in hybrid vehicles were sold out of 129,274 light vehicles.
 - **Nissan leads** with 18.7% of the market in September 2026, followed by General Motors (12.8%) and Volkswagen (8.7%).
+- **The forecast beats repeating last year.** For national sales, SARIMA cuts the seasonal naive error in half at 1–3 months (4.5% average error) and by 41% at 1–6 months. For the five largest brands the best model also wins, although it is not always the same model.
+- **The exchange rate adds little to the forecast.** Lagged 6 months, it slightly improves General Motors, Toyota, and KIA, and makes national, Nissan, and Volkswagen worse.
 
 ## Design decisions
 
@@ -179,11 +185,11 @@ First figures from the marts, using the October 2026 release (2005-01 to 2026-09
 
 ## Stack
 
-Today: Python (pandas, pyarrow), Parquet, INEGI and Banxico APIs, SQL on BigQuery (also on DuckDB with sqlglot), Cloud Storage, pytest, ruff, GitHub Actions. Planned: Cloud Run Jobs, Cloud Scheduler, Terraform, and a Looker Studio dashboard.
+Today: Python (pandas, pyarrow, statsmodels), Parquet, INEGI and Banxico APIs, SQL on BigQuery (also on DuckDB with sqlglot), Cloud Storage, pytest, ruff, GitHub Actions. Planned: Cloud Run Jobs, Cloud Scheduler, Terraform, and a Looker Studio dashboard.
 
 ## Data
 
 Source: INEGI, Registro Administrativo de la Industria Automotriz de Vehículos Ligeros (RAIAVL), [open data](https://www.inegi.org.mx/datosprimarios/iavl/) used under [INEGI's free-use terms](https://www.inegi.org.mx/inegi/terminos.html). This is an independent project: INEGI does not endorse or review it. The raw layer stores the zips exactly as published. The curated layer sets types, trims whitespace, adds the normalized model, and sums repeated rows (0.110% of sales units); it does not change any unit value. Exchange rate: Banco de México, Economic Information System (SIE), series SF43718 (FIX).
 
-Technical documentation (in Spanish): [repository README](https://github.com/eddieisoffline/inegi-auto-market/blob/main/README.md), [curated layer rules](https://github.com/eddieisoffline/inegi-auto-market/blob/main/docs/reglas_curated.md), [data contracts](https://github.com/eddieisoffline/inegi-auto-market/blob/main/docs/contratos.md), [warehouse and marts](https://github.com/eddieisoffline/inegi-auto-market/blob/main/docs/warehouse.md), and [test fixtures and their cases](https://github.com/eddieisoffline/inegi-auto-market/blob/main/tests/fixtures/README.md).
+Technical documentation (in Spanish): [repository README](https://github.com/eddieisoffline/inegi-auto-market/blob/main/README.md), [curated layer rules](https://github.com/eddieisoffline/inegi-auto-market/blob/main/docs/reglas_curated.md), [data contracts](https://github.com/eddieisoffline/inegi-auto-market/blob/main/docs/contratos.md), [warehouse and marts](https://github.com/eddieisoffline/inegi-auto-market/blob/main/docs/warehouse.md), [forecast](https://github.com/eddieisoffline/inegi-auto-market/blob/main/docs/pronostico.md), and [test fixtures and their cases](https://github.com/eddieisoffline/inegi-auto-market/blob/main/tests/fixtures/README.md).
 :::

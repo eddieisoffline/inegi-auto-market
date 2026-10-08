@@ -313,3 +313,57 @@ SELECT id_entidad, entidad
 FROM `${project}.raiavl_curated.ext_dim_entidad`
 WHERE TRUE
 QUALIFY publication_date = MAX(publication_date) OVER ();
+
+-- Pronóstico: métricas del backtest, pronósticos de los próximos 6 meses y cada pronóstico
+-- del backtest (de la ejecución más reciente de `forecast`).
+CREATE OR REPLACE TABLE `${project}.raiavl_curated.fct_forecast_results`
+AS
+SELECT
+  serie,
+  modelo,
+  horizonte,
+  n_pronosticos,
+  mae,
+  rmse,
+  mase,
+  mape,
+  mejora_mase_vs_base,
+  es_ganador,
+  primer_objetivo,
+  ultimo_objetivo,
+  ajuste_2020,
+  datos_hasta,
+  fecha_ejecucion,
+  semilla
+FROM `${project}.raiavl_curated.ext_forecast_results`;
+
+CREATE OR REPLACE TABLE `${project}.raiavl_curated.fct_forecast_predictions`
+PARTITION BY DATE_TRUNC(periodo, MONTH)
+AS
+SELECT
+  serie,
+  modelo,
+  periodo,
+  pronostico,
+  limite_inferior_80,
+  limite_superior_80,
+  es_ganador,
+  datos_hasta,
+  fecha_ejecucion
+FROM `${project}.raiavl_curated.ext_forecast_predictions`;
+
+CREATE OR REPLACE TABLE `${project}.raiavl_curated.fct_forecast_backtest`
+PARTITION BY DATE_TRUNC(objetivo, MONTH)
+CLUSTER BY serie, modelo
+AS
+SELECT
+  serie,
+  modelo,
+  origen,
+  h,
+  objetivo,
+  real,
+  pronostico,
+  escala_mase,
+  datos_hasta
+FROM `${project}.raiavl_curated.ext_forecast_backtest`;

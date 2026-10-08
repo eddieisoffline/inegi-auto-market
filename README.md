@@ -25,7 +25,7 @@ cuánto las explican el tipo de cambio y otras variables? Incluye un pronóstico
 | Clientes de API y conciliación | Hecho (local, APIs reales) | `reconcile` contra la API del INEGI: los 261 meses (2005-01 a 2026-09) de ventas, producción y exportación de la foto 2026-10-07 cuadran exacto; en la foto 2026-09-09, la única diferencia es agosto de 2026 en ventas (+1, dentro de tolerancia). `fx`: 5,477 días de Banxico (2005-01-03 a 2026-10-08), 262 meses |
 | Diff entre fotos | Hecho (local) | `diff` entre las dos fotos reales en 2.6 s: en ventas, la reclasificación de BMW (2021-12 a 2026-08, neto 0) y una sola revisión real (iX3, agosto de 2026, −1); en híbridos, 74 unidades de híbridas a plug-in en 23 entidades (febrero de 2026, neto 0) |
 | Warehouse en BigQuery y marts | Hecho (BigQuery y local) | Las 38 sentencias aplicadas en BigQuery desde un lake en Cloud Storage (2026-10-08): 12 tablas externas, 14 tablas (hechos particionados por mes) y 12 vistas; los marts reproducen las cifras oficiales y dan lo mismo que el warehouse local en DuckDB |
-| Pronóstico con backtesting | Pendiente | |
+| Pronóstico con backtesting | Hecho (local) | `forecast` con datos hasta 2026-09: origen móvil sobre 45 meses (2023-01 a 2026-09); en las 6 series y ambos horizontes el ganador le gana al ingenuo estacional (ver abajo) |
 | Dashboard | Pendiente | |
 | Infraestructura y despliegue | Pendiente | |
 
@@ -181,6 +181,35 @@ renglón por tipo de cambio más `total_historia`, el efecto neto sobre los mese
 estaban) y `reports/diff/`. Limitación: si una marca mueve unidades entre modelos y además
 revisa su total en el mismo mes, todas sus filas con cambio de total salen como revisión
 real; el resumen sí da el neto correcto.
+
+## Pronóstico
+
+```bash
+python -m inegi_market.cli forecast
+```
+
+Ventas nacionales y de las 5 marcas más grandes, a 1–6 meses. Cuatro modelos: ingenuo
+estacional (línea base obligatoria), ETS, SARIMA y SARIMAX con el tipo de cambio rezagado
+6 meses. Se valida con origen móvil: cada pronóstico usa solo datos hasta su origen y se
+evalúan los meses de 2023-01 a 2026-09. Marzo a junio de 2020 (confinamiento) se
+reemplazan, solo para entrenar, por una trayectoria sin confinamiento.
+
+**Quién gana y por cuánto** (MASE; menor es mejor, la base es el ingenuo estacional):
+
+| Serie | 1–3 meses | 1–6 meses |
+| --- | --- | --- |
+| Nacional | SARIMA, 0.527 contra 1.087 (−52 %; error medio 4.5 %) | SARIMA, 0.648 contra 1.093 (−41 %; 5.6 %) |
+| Nissan | SARIMA, −29 % | ETS, −14 % |
+| General Motors | SARIMAX con tipo de cambio, −14 % | SARIMAX con tipo de cambio, −6 % |
+| Volkswagen | ETS, −41 % | ETS, −29 % |
+| Toyota | SARIMAX con tipo de cambio, −24 % | SARIMAX con tipo de cambio, −24 % |
+| KIA | ETS, −28 % | SARIMAX con tipo de cambio, −21 % |
+
+El ganador le gana a la base en todas las series. No todos los modelos lo hacen: en General
+Motors, ETS no le gana. El tipo de cambio rezagado aporta poco y no siempre: mejora a
+SARIMA en General Motors, Toyota y KIA y lo empeora en la serie nacional, Nissan y
+Volkswagen. Sin el ajuste de 2020, en KIA ningún modelo le gana a la base. Método,
+tablas completas y limitaciones: [docs/pronostico.md](docs/pronostico.md).
 
 ## Warehouse y marts
 

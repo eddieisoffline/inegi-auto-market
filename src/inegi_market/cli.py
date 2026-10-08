@@ -8,6 +8,7 @@ from collections import Counter
 from .config import Settings
 from .curate import SPECS, CurateError, curate_all
 from .diff import DiffError, diff_latest
+from .forecast import ForecastConfig, ForecastError, run_forecast
 from .fx import update_fx
 from .ingest import IngestError, find_zips, ingest_file
 from .reconcile import ReconciliationError, reconcile
@@ -88,6 +89,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_diff.add_argument("--after", metavar="AAAA-MM-DD",
                         help="foto posterior (por defecto: la más reciente de cada producto)")
 
+    p_fc = sub.add_parser("forecast", help="pronóstico a 1-6 meses con backtesting contra la base")
+    p_fc.add_argument("--sin-ajuste-2020", dest="adjust_2020", action="store_false",
+                      help="entrena con 2020 sin ajustar (para comparar)")
+    p_fc.add_argument("--workers", type=int, default=0,
+                      help="procesos en paralelo, uno por serie (0: según los núcleos)")
+
     p_wh = sub.add_parser("warehouse", help="refresca BigQuery desde curated/ (DuckDB con --local)")
     p_wh.add_argument(
         "--local", nargs="?", const="data/warehouse.duckdb", metavar="ARCHIVO",
@@ -130,6 +137,15 @@ def main(argv: list[str] | None = None, client: HttpClient | None = None) -> Non
             log.error("curated detenido: %s", exc)
             raise SystemExit(1) from None
         log.info("curate: %d fotos, %d filas", len(results), sum(r.rows_written for r in results))
+        return
+
+    if args.command == "forecast":
+        try:
+            config = ForecastConfig(adjust_2020=args.adjust_2020, workers=args.workers)
+            run_forecast(storage, config)
+        except ForecastError as exc:
+            log.error("forecast detenido: %s", exc)
+            raise SystemExit(1) from None
         return
 
     if args.command == "warehouse":

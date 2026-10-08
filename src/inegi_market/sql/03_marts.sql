@@ -252,3 +252,61 @@ FROM `${project}.raiavl_curated.fct_resumen_cambios`
 WHERE TRUE
 QUALIFY foto_b = MAX(foto_b) OVER (PARTITION BY producto)
   AND foto_a = MAX(foto_a) OVER (PARTITION BY producto, foto_b);
+
+-- Pronóstico: serie real y pronóstico de los próximos 6 meses, para graficarlos juntos.
+-- `serie` es 'nacional' o el nombre de la marca; el real sale de los mismos hechos de ventas.
+CREATE OR REPLACE VIEW `${project}.raiavl_marts.mart_pronostico` AS
+WITH series AS (
+  SELECT DISTINCT serie FROM `${project}.raiavl_curated.fct_forecast_predictions`
+),
+reales AS (
+  SELECT 'nacional' AS serie, periodo, SUM(unidades) AS unidades
+  FROM `${project}.raiavl_curated.fct_ventas_mensual`
+  GROUP BY periodo
+  UNION ALL
+  SELECT v.marca AS serie, v.periodo, SUM(v.unidades) AS unidades
+  FROM `${project}.raiavl_curated.fct_ventas_mensual` AS v
+  JOIN series AS s ON s.serie = v.marca
+  GROUP BY v.marca, v.periodo
+)
+SELECT
+  r.serie,
+  r.periodo,
+  'real' AS tipo,
+  CAST(NULL AS STRING) AS modelo,
+  CAST(r.unidades AS FLOAT64) AS valor,
+  CAST(NULL AS FLOAT64) AS limite_inferior_80,
+  CAST(NULL AS FLOAT64) AS limite_superior_80,
+  CAST(NULL AS BOOL) AS es_ganador
+FROM reales AS r
+JOIN series AS s ON s.serie = r.serie
+UNION ALL
+SELECT
+  serie,
+  periodo,
+  'pronostico' AS tipo,
+  modelo,
+  pronostico AS valor,
+  limite_inferior_80,
+  limite_superior_80,
+  es_ganador
+FROM `${project}.raiavl_curated.fct_forecast_predictions`;
+
+-- Pronóstico: error de cada modelo en el backtest y mejora contra el ingenuo estacional.
+CREATE OR REPLACE VIEW `${project}.raiavl_marts.mart_pronostico_metricas` AS
+SELECT
+  serie,
+  modelo,
+  horizonte,
+  n_pronosticos,
+  mae,
+  rmse,
+  mase,
+  mape,
+  mejora_mase_vs_base,
+  es_ganador,
+  primer_objetivo,
+  ultimo_objetivo,
+  ajuste_2020,
+  datos_hasta
+FROM `${project}.raiavl_curated.fct_forecast_results`;

@@ -37,3 +37,12 @@ OPTIONS (format = 'PARQUET', uris = ['gs://${bucket}/curated/snapshot_changes/*'
 
 CREATE OR REPLACE EXTERNAL TABLE `${project}.raiavl_curated.ext_resumen_cambios`
 OPTIONS (format = 'PARQUET', uris = ['gs://${bucket}/curated/snapshot_summary/*']);
+
+CREATE OR REPLACE EXTERNAL TABLE `${project}.raiavl_curated.ext_forecast_results`
+OPTIONS (format = 'PARQUET', uris = ['gs://${bucket}/curated/forecast_results/*']);
+
+CREATE OR REPLACE EXTERNAL TABLE `${project}.raiavl_curated.ext_forecast_predictions`
+OPTIONS (format = 'PARQUET', uris = ['gs://${bucket}/curated/forecast_predictions/*']);
+
+CREATE OR REPLACE EXTERNAL TABLE `${project}.raiavl_curated.ext_forecast_backtest`
+OPTIONS (format = 'PARQUET', uris = ['gs://${bucket}/curated/forecast_backtest/*']);
