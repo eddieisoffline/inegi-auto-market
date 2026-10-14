@@ -63,7 +63,7 @@ def kind(statement):
 
 def test_counts_and_order(statements):
     kinds = [kind(s)[0] for s in statements]
-    assert kinds == ["EXTERNAL TABLE"] * 15 + ["TABLE"] * 17 + ["VIEW"] * 14
+    assert kinds == ["EXTERNAL TABLE"] * 15 + ["TABLE"] * 18 + ["VIEW"] * 15
 
 
 def test_every_statement_is_idempotent_and_placeholders_are_resolved(statements):
@@ -101,7 +101,7 @@ def test_fact_tables_are_partitioned_by_month_and_use_the_latest_photo(statement
 
 
 def test_seed_comes_from_the_versioned_csv():
-    statement = seed_statement("p")
+    statement = seed_statement("p", "seed_marca")
     assert statement.startswith("CREATE OR REPLACE TABLE `p.raiavl_curated.seed_marca` AS")
     assert "SELECT 'JETOUR' AS marca, 'Jetour Soueast' AS marca_canonica" in statement
     assert "'Mercedes Benz_Prod_Expo' AS marca, 'Mercedes Benz' AS marca_canonica" in statement
@@ -140,7 +140,7 @@ def test_run_warehouse_validates_the_environment():
     with pytest.raises(WarehouseError, match=r"curated/recon/ \(corre 'reconcile'\)"):
         run_warehouse(gcs, MemoryStorage(), FakeClient())
     client = FakeClient()
-    assert run_warehouse(gcs, lake_with_inputs(), client) == len(client.queries) == 46
+    assert run_warehouse(gcs, lake_with_inputs(), client) == len(client.queries) == 48
 
 
 # --- ejecución real del mismo SQL en DuckDB, con los fixtures --------------------------------
@@ -165,7 +165,7 @@ def warehouse(tmp_path_factory):
     diff_latest(storage)
     write_forecast_outputs(storage)
     database = root / "warehouse.duckdb"
-    assert build_local(root, database, storage) == 46
+    assert build_local(root, database, storage) == 48
     with duckdb.connect(str(database), read_only=True) as con:
         yield con
 
@@ -240,9 +240,10 @@ def test_exchange_rate_and_hybrid_marts(warehouse):
                             "FROM raiavl_marts.mart_tipo_cambio_ventas "
                             "WHERE periodo = '2026-09-01'")
     assert fx[0] == pytest.approx(18.0692)
-    states = rows(warehouse, "SELECT DISTINCT entidad FROM raiavl_marts.mart_hibridos_entidad "
-                             "ORDER BY entidad")
-    assert states == [("Aguascalientes",), ("Baja California Sur",), ("Ciudad de México",)]
+    states = rows(warehouse, "SELECT DISTINCT entidad, codigo_iso "
+                             "FROM raiavl_marts.mart_hibridos_entidad ORDER BY entidad")
+    assert states == [("Aguascalientes", "MX-AGU"), ("Baja California Sur", "MX-BCS"),
+                      ("Ciudad de México", "MX-CMX")]
 
 
 def test_cli_warehouse(tmp_path, monkeypatch):
@@ -264,3 +265,26 @@ def test_forecast_marts_join_actuals_and_predictions(warehouse):
     (winner,) = rows(warehouse, "SELECT modelo, mejora_mase_vs_base "
                                 "FROM raiavl_marts.mart_pronostico_metricas WHERE es_ganador")
     assert winner == ("sarima", 0.75)
+
+
+def test_state_seed_covers_the_32_states_with_iso_codes():
+    statement = seed_statement("p", "seed_entidad_iso")
+    assert statement.count("UNION ALL") == 31
+    assert "SELECT '09' AS id_entidad, 'MX-CMX' AS codigo_iso" in statement
+    assert "SELECT '15' AS id_entidad, 'MX-MEX' AS codigo_iso" in statement
+
+
+def test_export_destinations_mart(warehouse):
+    shares = rows(warehouse, "SELECT periodo, SUM(participacion) "
+                             "FROM raiavl_marts.mart_exportacion_destino GROUP BY periodo")
+    assert all(abs(total - 1) < 1e-9 for _, total in shares)
+    assert rows(warehouse, "SELECT COUNT(*) FROM raiavl_marts.mart_exportacion_destino "
+                           "WHERE pais IS NULL") == [(0,)]
+
+
+def test_last_month_flag_marks_only_the_latest_published_month(warehouse):
+    for view in ("mart_ventas_mensual", "mart_marca_mensual", "mart_origen_mensual",
+                 "mart_industria_mensual", "mart_electrificacion_mensual"):
+        flagged = rows(warehouse, f"SELECT DISTINCT CAST(periodo AS VARCHAR) "
+                                  f"FROM raiavl_marts.{view} WHERE es_ultimo_mes")
+        assert flagged == [("2026-09-01",)], view

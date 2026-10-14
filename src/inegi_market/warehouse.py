@@ -1,10 +1,10 @@
 """Warehouse: BigQuery a partir del Parquet curado del data lake (ELT).
 
-Python mueve y valida; SQL transforma. El trabajo lo hacen tres archivos SQL, más la
-semilla de marcas:
+Python mueve y valida; SQL transforma. El trabajo lo hacen tres archivos SQL y dos
+semillas versionadas:
 
     01_external_tables.sql  tablas externas sobre curated/ (raiavl_curated.ext_*)
-    seeds/marcas.csv        nombre canónico de marcas -> raiavl_curated.seed_marca
+    seeds/*.csv             semillas versionadas -> raiavl_curated.seed_* (marcas, entidades)
     02_tables.sql           hechos y dimensiones nativos (raiavl_curated.fct_*, dim_*)
     03_marts.sql            vistas para el dashboard (raiavl_marts.mart_*)
 
@@ -33,7 +33,11 @@ from .storage import Storage
 log = logging.getLogger(__name__)
 
 SQL_FILES = ("01_external_tables.sql", "02_tables.sql", "03_marts.sql")
-SEED_FILE = "marcas.csv"
+# Semillas versionadas (sql/seeds/*.csv) -> tabla en raiavl_curated, con sus columnas.
+SEEDS = {
+    "seed_marca": ("marcas.csv", ("marca", "marca_canonica", "nota")),
+    "seed_entidad_iso": ("entidades_iso.csv", ("id_entidad", "codigo_iso")),
+}
 DATASETS = ("raiavl_curated", "raiavl_marts")
 # Lo que leen las tablas externas: sin estos prefijos el warehouse no se puede construir.
 REQUIRED_PREFIXES = (
@@ -85,18 +89,18 @@ def _literal(value: str) -> str:
     return f"'{value}'"
 
 
-def seed_statement(project: str) -> str:
-    """CREATE OR REPLACE TABLE seed_marca a partir de seeds/marcas.csv."""
-    text = (resources.files("inegi_market") / "sql" / "seeds" / SEED_FILE).read_text("utf-8")
+def seed_statement(project: str, table: str) -> str:
+    """CREATE OR REPLACE TABLE de una semilla a partir de su CSV versionado."""
+    file_name, columns = SEEDS[table]
+    text = (resources.files("inegi_market") / "sql" / "seeds" / file_name).read_text("utf-8")
     rows = list(csv.DictReader(io.StringIO(text)))
     if not rows:
-        raise WarehouseError("la semilla de marcas está vacía")
+        raise WarehouseError(f"la semilla {file_name} está vacía")
     selects = [
-        "SELECT " + ", ".join(f"{_literal(row[c].strip())} AS {c}" for c in
-                              ("marca", "marca_canonica", "nota"))
+        "SELECT " + ", ".join(f"{_literal(row[c].strip())} AS {c}" for c in columns)
         for row in rows
     ]
-    return (f"CREATE OR REPLACE TABLE `{project}.raiavl_curated.seed_marca` AS\n"
+    return (f"CREATE OR REPLACE TABLE `{project}.raiavl_curated.{table}` AS\n"
             + "\nUNION ALL\n".join(selects))
 
 
@@ -108,7 +112,7 @@ def build_statements(project: str, bucket: str) -> list[str]:
         text = Template(_sql_text(name)).substitute(project=project, bucket=bucket)
         statements.extend(split_statements(text))
         if name == "01_external_tables.sql":
-            statements.append(seed_statement(project))
+            statements.extend(seed_statement(project, table) for table in SEEDS)
     return statements
 
 

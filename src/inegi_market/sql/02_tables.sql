@@ -307,12 +307,18 @@ FROM (
 )
 GROUP BY id_pais;
 
+-- Entidades federativas con su código ISO 3166-2 (semilla), para los mapas del dashboard.
+-- "99 No especificado" no tiene código.
 CREATE OR REPLACE TABLE `${project}.raiavl_curated.dim_entidad`
 AS
-SELECT id_entidad, entidad
-FROM `${project}.raiavl_curated.ext_dim_entidad`
-WHERE TRUE
-QUALIFY publication_date = MAX(publication_date) OVER ();
+SELECT e.id_entidad, e.entidad, s.codigo_iso
+FROM (
+  SELECT id_entidad, entidad
+  FROM `${project}.raiavl_curated.ext_dim_entidad`
+  WHERE TRUE
+  QUALIFY publication_date = MAX(publication_date) OVER ()
+) AS e
+LEFT JOIN `${project}.raiavl_curated.seed_entidad_iso` AS s ON s.id_entidad = e.id_entidad;
 
 -- Pronóstico: métricas del backtest, pronósticos de los próximos 6 meses y cada pronóstico
 -- del backtest (de la ejecución más reciente de `forecast`).

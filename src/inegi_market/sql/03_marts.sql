@@ -1,7 +1,8 @@
 -- Capa de consumo para el dashboard: vistas sobre los hechos y las dimensiones.
 -- Las razones (participacion, variacion_*) van de 0 a 1 y se formatean como porcentaje
 -- en el reporte. Para agregar varias filas se suman las unidades y se vuelve a dividir;
--- nunca se promedian las razones.
+-- nunca se promedian las razones. `es_ultimo_mes` marca el último mes publicado, para que
+-- las tarjetas del dashboard se actualicen solas con cada publicación.
 
 -- Ventas nacionales por mes, con variación contra el mes anterior y el mismo mes del año
 -- anterior.
@@ -21,7 +22,8 @@ SELECT
   p.unidades AS unidades_mes_anterior,
   SAFE_DIVIDE(m.unidades - p.unidades, p.unidades) AS variacion_mensual,
   a.unidades AS unidades_anio_anterior,
-  SAFE_DIVIDE(m.unidades - a.unidades, a.unidades) AS variacion_anual
+  SAFE_DIVIDE(m.unidades - a.unidades, a.unidades) AS variacion_anual,
+  m.periodo = (SELECT MAX(periodo) FROM m) AS es_ultimo_mes
 FROM m
 JOIN `${project}.raiavl_curated.dim_fecha` AS f ON f.periodo = m.periodo
 LEFT JOIN m AS p ON p.periodo = DATE_SUB(m.periodo, INTERVAL 1 MONTH)
@@ -60,7 +62,8 @@ SELECT
   p.unidades AS unidades_mes_anterior,
   SAFE_DIVIDE(s.unidades - p.unidades, p.unidades) AS variacion_mensual,
   a.unidades AS unidades_anio_anterior,
-  SAFE_DIVIDE(s.unidades - a.unidades, a.unidades) AS variacion_anual
+  SAFE_DIVIDE(s.unidades - a.unidades, a.unidades) AS variacion_anual,
+  s.periodo = (SELECT MAX(periodo) FROM mercado) AS es_ultimo_mes
 FROM serie AS s
 JOIN mercado AS k ON k.periodo = s.periodo
 LEFT JOIN serie AS p
@@ -123,7 +126,8 @@ SELECT
   SUM(IF(origen = 'IMPORTADO', unidades, 0)) AS unidades_importado,
   SUM(unidades) AS unidades,
   SAFE_DIVIDE(SUM(IF(origen = 'IMPORTADO', unidades, 0)), SUM(unidades))
-    AS participacion_importado
+    AS participacion_importado,
+  periodo = MAX(periodo) OVER () AS es_ultimo_mes
 FROM `${project}.raiavl_curated.fct_ventas_mensual`
 GROUP BY periodo;
 
@@ -180,11 +184,28 @@ SELECT
   v.ventas,
   p.produccion,
   e.exportacion,
-  SAFE_DIVIDE(e.exportacion, p.produccion) AS exportacion_sobre_produccion
+  SAFE_DIVIDE(e.exportacion, p.produccion) AS exportacion_sobre_produccion,
+  f.periodo = (SELECT MAX(periodo) FROM `${project}.raiavl_curated.dim_fecha`) AS es_ultimo_mes
 FROM `${project}.raiavl_curated.dim_fecha` AS f
 LEFT JOIN v ON v.periodo = f.periodo
 LEFT JOIN p ON p.periodo = f.periodo
 LEFT JOIN e ON e.periodo = f.periodo;
+
+-- Exportaciones por país de destino, con su participación en el mes.
+CREATE OR REPLACE VIEW `${project}.raiavl_marts.mart_exportacion_destino` AS
+WITH x AS (
+  SELECT periodo, id_pais_destino, SUM(unidades) AS unidades
+  FROM `${project}.raiavl_curated.fct_exportacion_mensual`
+  GROUP BY periodo, id_pais_destino
+)
+SELECT
+  x.periodo,
+  x.id_pais_destino,
+  p.pais,
+  x.unidades,
+  SAFE_DIVIDE(x.unidades, SUM(x.unidades) OVER (PARTITION BY x.periodo)) AS participacion
+FROM x
+LEFT JOIN `${project}.raiavl_curated.dim_pais` AS p ON p.id_pais = x.id_pais_destino;
 
 -- Híbridos y eléctricos por entidad federativa.
 CREATE OR REPLACE VIEW `${project}.raiavl_marts.mart_hibridos_entidad` AS
@@ -192,6 +213,7 @@ SELECT
   h.periodo,
   h.id_entidad,
   e.entidad,
+  e.codigo_iso,
   h.veh_electricos,
   h.veh_hibridos_plugin,
   h.veh_hibridos,
@@ -219,7 +241,8 @@ SELECT
   h.veh_hibridos,
   h.total_electrificados,
   v.unidades AS ventas_totales,
-  SAFE_DIVIDE(h.total_electrificados, v.unidades) AS participacion_electrificados
+  SAFE_DIVIDE(h.total_electrificados, v.unidades) AS participacion_electrificados,
+  h.periodo = (SELECT MAX(periodo) FROM h) AS es_ultimo_mes
 FROM h
 LEFT JOIN `${project}.raiavl_marts.mart_ventas_mensual` AS v ON v.periodo = h.periodo;
 
