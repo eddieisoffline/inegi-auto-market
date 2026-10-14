@@ -1,1 +1,1 @@
-"""Fuentes externas: zips del INEGI por HTTP (iteración 2) y APIs del INEGI y Banxico (it. 5)."""
+"""Fuentes externas: zips del INEGI por HTTP y APIs del INEGI y de Banxico."""

@@ -1,232 +1,272 @@
 # inegi-auto-market
 
-Análisis del mercado automotriz de México con datos públicos y vivos del INEGI
-(ventas, producción, exportación y venta de híbridos y eléctricos de vehículos
-ligeros) y del Banco de México (tipo de cambio).
+[![CI](https://github.com/eddieisoffline/inegi-auto-market/actions/workflows/ci.yml/badge.svg)](https://github.com/eddieisoffline/inegi-auto-market/actions/workflows/ci.yml)
 
-**Pregunta:** ¿cómo evolucionan las ventas por marca, qué tan estacionales son y
-cuánto las explican el tipo de cambio y otras variables? Incluye un pronóstico a
-3–6 meses validado con backtesting contra un modelo ingenuo estacional.
+Mercado automotriz de México con datos públicos y vivos del INEGI (ventas, producción,
+exportación y venta de híbridos y eléctricos de vehículos ligeros, desde 2005) y del
+Banco de México (tipo de cambio). Un pipeline guarda cada publicación mensual como una
+foto inmutable, la valida, la concilia contra la API del INEGI, mide qué cambió entre
+publicaciones, pronostica las ventas y alimenta un warehouse en BigQuery.
 
-> Proyecto en construcción por iteraciones. La tabla "Estado" dice solo lo que ya se
-> ejecutó de verdad.
+**Pregunta:** ¿cómo evolucionan las ventas por marca, qué tan estacionales son y cuánto
+las explica el tipo de cambio? Con un pronóstico a 3–6 meses que solo se reporta si le
+gana a la línea base.
 
-## Estado
+Cifras con la publicación del 7 de octubre de 2026 (datos de 2005-01 a 2026-09).
 
-| Componente | Estado | Evidencia |
-| --- | --- | --- |
-| Esqueleto, configuración y almacenamiento local/GCS | Hecho | `pytest` y `ruff` en verde en local |
-| Fixtures de prueba recortados de las dos fotos reales | Hecho | 8 recortes (4 productos × 2 fotos), 71 KB |
-| CI en GitHub Actions | Hecho | ruff y pytest en verde en cada push a `main` |
-| Ingesta de una foto a raw | Hecho (local) | `ingest` con las dos fotos reales: 8 particiones (2 por producto), bytes idénticos a los originales; la segunda ejecución no escribe nada |
-| Detector de publicación nueva y descarga | Hecho (desde la máquina del autor) | `fetch` contra el INEGI real: 4 zips descargados en 141 s, idénticos byte a byte a los bajados a mano; después, `check` y `fetch` sin descargas en ~1 s. Pendiente probarlo desde Cloud Run |
-| Capa curated (Parquet) | Hecho (local) | `curate` de las dos fotos reales: 640,889 filas en 162 Parquet (4.7 MB); los totales mensuales cuadran con la suma de los CSV en las 8 fotos y con las cifras oficiales anotadas; volver a curar deja los archivos idénticos |
-| Contratos de datos | Hecho (local) | Corren dentro de `curate`: las dos fotos reales pasan sin advertencias; una foto real sin el año 2020 se detiene sin escribir nada. Repetidos sobre 249 meses de historia: 1 error (salida real de Chirey en 2025-04) y 2 advertencias |
-| Clientes de API y conciliación | Hecho (local, APIs reales) | `reconcile` contra la API del INEGI: los 261 meses (2005-01 a 2026-09) de ventas, producción y exportación de la foto 2026-10-07 cuadran exacto; en la foto 2026-09-09, la única diferencia es agosto de 2026 en ventas (+1, dentro de tolerancia). `fx`: 5,477 días de Banxico (2005-01-03 a 2026-10-08), 262 meses |
-| Diff entre fotos | Hecho (local) | `diff` entre las dos fotos reales en 2.6 s: en ventas, la reclasificación de BMW (2021-12 a 2026-08, neto 0) y una sola revisión real (iX3, agosto de 2026, −1); en híbridos, 74 unidades de híbridas a plug-in en 23 entidades (febrero de 2026, neto 0) |
-| Warehouse en BigQuery y marts | Hecho (BigQuery y local) | Las 38 sentencias aplicadas en BigQuery desde un lake en Cloud Storage (2026-10-08): 12 tablas externas, 14 tablas (hechos particionados por mes) y 12 vistas; los marts reproducen las cifras oficiales y dan lo mismo que el warehouse local en DuckDB |
-| Pronóstico con backtesting | Hecho (local) | `forecast` con datos hasta 2026-09: origen móvil sobre 45 meses (2023-01 a 2026-09); en las 6 series y ambos horizontes el ganador le gana al ingenuo estacional (ver abajo) |
-| Dashboard | Pendiente | |
-| Infraestructura y despliegue | Pendiente | |
+**Dashboard:** [Mercado automotriz de México en Looker Studio](https://datastudio.google.com/reporting/cda06336-ca03-4f2f-9e40-a6b301ee36d2),
+seis páginas sobre los marts de BigQuery: mercado, tendencia, industria, electrificación,
+pronóstico y calidad.
+
+[![Página "Mercado" del dashboard: participación por marca, participación en el tiempo y ranking](docs/img/dashboard-mercado.png)](https://datastudio.google.com/reporting/cda06336-ca03-4f2f-9e40-a6b301ee36d2)
+
+## Hallazgos
+
+**El mercado.**
+
+- **Recuperado y en máximos recientes.** En 2025 se vendieron 1.52 millones de vehículos
+  ligeros, 16 % más que en 2019. El récord sigue siendo 2016 (1.61 millones) y el piso,
+  2020 (0.95 millones, −28 % contra 2019). De enero a septiembre de 2026 las ventas van
+  5 % arriba del mismo periodo de 2025.
+- **China ya es el segundo origen de lo que se vende.** Los vehículos hechos en China
+  pasaron de 0 % de las ventas en 2016 a 20.1 % en 2025 y 23.0 % en lo que va de 2026,
+  solo detrás de los hechos en México (35 %). Ganan mercado marcas nuevas o recientes
+  (Geely, de 0 % a 2.9 %; Changan, de 0 % a 1.4 %; MG Motor, de 1.0 % a 3.4 %),
+  mientras Nissan baja de 20.5 % a 17.4 % y Honda de 4.4 % a 2.6 %
+  (doce meses a septiembre de 2021 contra doce meses a septiembre de 2026). Nissan sigue
+  liderando.
+- **Dos de cada tres autos vendidos son importados** (67 % en 2026), aunque México
+  produce 2.6 veces lo que vende: en 2025 produjo 3.95 millones y exportó el 86 %, el
+  78 % de eso a Estados Unidos y el 11 % a Canadá.
+- **La electrificación se acelera.** Eléctricos, híbridos e híbridos plug-in pasaron de
+  0.5 % de las ventas en 2016 a 9.6 % en 2025 y 12.8 % en 2026; de enero a septiembre
+  de 2026 ya se vendieron casi tantos como en todo 2025.
+- **SUV, el segmento dominante.** Pasaron de 18 % de las ventas en 2010 a 39 % en 2025;
+  los subcompactos cayeron de 36 % (2015) a 21.5 %.
+
+**Estacionalidad y tipo de cambio.**
+
+- **Diciembre vende 33 % más que un mes promedio** y abril 13 % menos (índice
+  estacional por razón a media móvil, 2005–2026). Sin 2020, diciembre queda igual y
+  abril pasa de 0.87 a 0.89.
+- **El tipo de cambio explica poco.** La correlación entre la variación anual de las
+  ventas y la del tipo de cambio es débil: −0.22 en el mismo mes, −0.18 con 6 meses de
+  rezago y +0.03 con 12 (sin 2020 y 2021). En el pronóstico, agregarlo con 6 meses de
+  rezago mejora un poco a General Motors, Toyota y KIA y empeora la serie nacional,
+  Nissan y Volkswagen.
+
+**Pronóstico.** Con validación de origen móvil sobre 45 meses (2023-01 a 2026-09),
+SARIMA reduce a la mitad el error de repetir el mismo mes del año anterior para las
+ventas nacionales a 1–3 meses (MASE 0.527 contra 1.087; error medio de 4.5 %) y en 41 %
+a 1–6 meses. En las cinco marcas más grandes el mejor modelo también le gana a la línea
+base, aunque no siempre es el mismo. Pronóstico nacional: 164,473 vehículos en
+diciembre de 2026 (intervalo de 80 %: 148,527 a 182,132).
+[Método y tablas](docs/pronostico.md).
+
+**Los datos cambian, y el pipeline lo mide.**
+
+- **Una publicación puede reescribir el pasado sin cambiar el total.** En octubre de
+  2026, BMW movió 8,717 unidades de "Serie 2" y "Serie 3" importados a modelos
+  nacionales nuevos, de diciembre de 2021 a agosto de 2026 (105 combinaciones de mes y
+  modelo). El total histórico de ventas cambió en 1 unidad (BMW iX3, agosto de 2026).
+  En híbridos, 74 unidades pasaron de "híbridas" a "plug-in" en 23 estados, con neto
+  cero.
+- **Los totales cuadran con la fuente oficial.** Los 261 meses de ventas, producción y
+  exportación coinciden exacto con el Banco de Indicadores del INEGI.
+- **Las cifras pasan a definitivas un mes a la vez.** En octubre solo septiembre de
+  2023 pasó a definitivas, aunque la nota oficial dice que el cambio es en febrero; la
+  API, en cambio, marca todo 2023 con el mismo código de estatus (su significado no está
+  documentado). Hipótesis: los archivos siguen una ventana móvil de 36 meses.
+- **Calidad de origen:** 137 claves repetidas (0.11 % de las unidades, se suman), 87
+  correcciones negativas, marcas que cambian de nombre (JETOUR → Jetour Soueast) y un
+  servidor con réplicas que no coinciden en sus cabeceras.
+
+## Arquitectura
+
+```mermaid
+flowchart LR
+    Z["INEGI RAIAVL<br/>4 zips mensuales"] -- "check / fetch" --> R["raw<br/>fotos inmutables"]
+    R -- "curate + contratos" --> C["curated<br/>Parquet tipado"]
+    A["API del INEGI"] -- "reconcile" --> C
+    B["API de Banxico"] -- "fx" --> C
+    C -- "diff, forecast" --> C
+    C -- "warehouse" --> W["BigQuery<br/>hechos, dimensiones, marts"]
+    W --> D["Looker Studio"]
+```
+
+El lake vive en una carpeta local o en Cloud Storage con el mismo código. El warehouse es
+SQL de BigQuery que también corre en DuckDB sobre el lake local (traducido con sqlglot),
+así se valida con datos reales sin la nube. Detalle: [docs/arquitectura.md](docs/arquitectura.md).
+
+## Alcance y validación
+
+| Componente | Validación con datos reales |
+| --- | --- |
+| Detección y descarga | `fetch` contra el servidor del INEGI: 4 zips (69 MB) en 141 s, idénticos byte a byte a los descargados a mano; sin publicación nueva no descarga nada |
+| Ingesta a raw | Las dos publicaciones (8 zips) quedan con los bytes originales; repetir no escribe nada |
+| Capa curated y contratos | 640,889 filas; totales mensuales iguales a la suma de los CSV y a las cifras oficiales; los contratos detienen un lote con meses faltantes |
+| Conciliación y tipo de cambio | 261 de 261 meses cuadran con la API del INEGI en ventas, producción y exportación; 5,477 días de tipo de cambio FIX |
+| Comparación entre publicaciones | Encuentra la reclasificación de BMW y la revisión del iX3 (−1) entre las dos publicaciones |
+| Warehouse | 48 sentencias aplicadas en BigQuery; los marts dan los mismos resultados en BigQuery y en DuckDB |
+| Pronóstico | El modelo ganador le gana a la línea base en las 6 series y en los dos horizontes |
+| Dashboard | Seis páginas en Looker Studio sobre los marts de BigQuery |
+| CI | `ruff` y 239 pruebas sin red en cada push |
+
+## Decisiones de diseño
+
+- **Cada publicación es una foto inmutable,** identificada por la fecha `modified` de su
+  metadato; un zip regenerado con los mismos datos no cuenta como cambio y una corrección
+  silenciosa detiene la ingesta ([arquitectura](docs/arquitectura.md#principios-de-diseño)).
+- **Detectar sin descargar:** un HEAD por zip, con 10 minutos de tolerancia en
+  `Last-Modified` porque las réplicas del servidor no coinciden en sus cabeceras
+  ([arquitectura](docs/arquitectura.md#principios-de-diseño)).
+- **Los duplicados se suman por el nombre original del modelo:** con el nombre
+  normalizado se fusionarían 113 claves que el INEGI reporta por separado, como "Tacoma"
+  y "Tacoma-" ([reglas de curated](docs/reglas_curated.md#reglas)).
+- **Contratos calibrados con la historia:** aplicados a cada mes desde 2006, habrían
+  frenado un solo lote en 249 meses, la salida real de Chirey en abril de 2025
+  ([contratos](docs/contratos.md#calibración-con-datos-reales)).
+- **Las publicaciones se comparan a nivel de marca y modelo normalizado,** porque la clave
+  fina no es estable entre publicaciones; cada cambio se clasifica como mes nuevo,
+  reclasificación, revisión real o cambio de estatus ([operación](docs/operacion.md#diff)).
+- **El pronóstico no se reporta sin línea base,** se valida sin mirar el futuro y trata
+  2020 de forma explícita ([pronóstico](docs/pronostico.md#validación)).
+- **Sin secretos en el repositorio:** los tokens solo se leen del entorno y se borran de
+  los mensajes y de las respuestas guardadas ([operación](docs/operacion.md#configuración)).
+
+## Inicio rápido
+
+```bash
+pip install -e ".[dev]"
+# tokens gratuitos del INEGI y de Banxico, solo como variables de entorno
+export INEGI_TOKEN=... BANXICO_TOKEN=...
+
+inegi-market fetch                # o: inegi-market ingest --zip <carpeta con los 4 zips>
+inegi-market curate               # Parquet tipado + contratos de datos
+inegi-market reconcile            # contra la API del INEGI
+inegi-market fx                   # tipo de cambio de Banxico
+inegi-market diff                 # qué cambió entre las dos publicaciones más recientes
+inegi-market forecast             # pronóstico con backtesting (~75 s)
+inegi-market warehouse --local    # warehouse en DuckDB: data/warehouse.duckdb
+```
+
+Para BigQuery: `INEGI_MARKET_BACKEND=gcs`, `INEGI_MARKET_BUCKET` e
+`INEGI_MARKET_PROJECT`, y `inegi-market warehouse`. La configuración, cada comando, la
+estructura del lake y la solución de problemas están en
+[docs/operacion.md](docs/operacion.md).
+
+## Documentación
+
+| Documento | Contenido |
+| --- | --- |
+| [docs/README.md](docs/README.md) | índice de la documentación |
+| [arquitectura.md](docs/arquitectura.md) | flujo, capas del lake, módulos y principios de diseño |
+| [operacion.md](docs/operacion.md) | instalación, configuración, comandos, ciclo mensual y solución de problemas |
+| [reglas_curated.md](docs/reglas_curated.md) | columnas, claves y normalización de la capa curated |
+| [contratos.md](docs/contratos.md) | reglas de validación y su calibración con la historia |
+| [warehouse.md](docs/warehouse.md) | tablas, dimensiones y marts de BigQuery |
+| [pronostico.md](docs/pronostico.md) | modelos, validación, tratamiento de 2020 y resultados |
+| [CHANGELOG.md](CHANGELOG.md) | cambios por versión |
+
+## Capturas
+
+Las demás páginas del [dashboard](https://datastudio.google.com/reporting/cda06336-ca03-4f2f-9e40-a6b301ee36d2):
+
+**Tendencia y estacionalidad.** Ventas contra el año anterior, índice estacional, mezcla
+por segmento, importados y tipo de cambio.
+
+![Página "Tendencia y estacionalidad" del dashboard](docs/img/dashboard-tendencia.png)
+
+**Producción y exportación.** Ventas, producción y exportación desde 2017, exportación
+sobre producción por año, principales destinos y producción por marca.
+
+![Página "Producción y exportación" del dashboard](docs/img/dashboard-industria.png)
+
+**Híbridos y eléctricos.** Electrificados por tipo, participación en las ventas y venta por
+entidad.
+
+![Página "Híbridos y eléctricos" del dashboard](docs/img/dashboard-electrificacion.png)
+
+**Pronóstico.** Real y pronóstico a 6 meses con intervalo de 80 %, y error de cada modelo
+en el backtest contra la línea base.
+
+![Página "Pronóstico" del dashboard](docs/img/dashboard-pronostico.png)
+
+**Calidad y revisiones.** Conciliación contra la API del INEGI y cambios entre
+publicaciones.
+
+![Página "Calidad y revisiones" del dashboard](docs/img/dashboard-calidad.png)
+
+**BigQuery.** Los datasets `raiavl_curated` y `raiavl_marts`, con una consulta que une
+cuatro marts. Septiembre de 2026 da las cifras oficiales: 129,274 vendidos, 301,803
+producidos y 277,369 exportados.
+
+![Consola de BigQuery con los marts](docs/img/bigquery-marts.png)
+
+**Cloud Storage.** La capa curated en el bucket, con una carpeta por publicación
+(`publication_date=`) y por año.
+
+![Bucket de Cloud Storage con la capa curated](docs/img/gcs-lake.png)
+
+**CI.** `ruff` y las pruebas sin red en GitHub Actions en cada push.
+
+![Ejecuciones del CI en verde](docs/img/ci-verde.png)
+
+## Limitaciones
+
+- **La historia de revisiones empieza con la primera foto guardada** (septiembre de
+  2026). No se simulan revisiones anteriores.
+- **El backtest usa la publicación más reciente,** no la que existía en cada origen: el
+  error en tiempo real podría ser algo mayor.
+- **La relación con el tipo de cambio es descriptiva:** correlaciones simples y un
+  modelo con rezago fijo, no un modelo causal.
+- **Producción y exportación reportan grupos** ("BMW Group", "Ford Motor") que no se
+  igualan a las marcas de ventas.
+- **Sin ejecución programada:** cada publicación se procesa corriendo el ciclo mensual de
+  comandos. La descarga desde Cloud Run no está probada; desde Cloud Shell el servidor
+  del INEGI responde.
+
+## Hoja de ruta
+
+- Infraestructura como código con Terraform: bucket, datasets, cuentas de servicio,
+  Secret Manager para los tokens y Artifact Registry.
+- Imagen de contenedor y Cloud Run Job con el ciclo mensual, disparado por Cloud
+  Scheduler, con despliegue por SHA desde GitHub Actions.
+- Prueba de la descarga de los zips desde Cloud Run.
+- Confirmar la ventana móvil de 36 meses de las cifras definitivas con las publicaciones
+  de noviembre de 2026 y febrero de 2027.
 
 ## Fuentes y atribución
 
 **Fuente: INEGI, Registro Administrativo de la Industria Automotriz de Vehículos
 Ligeros (RAIAVL).** Datos abiertos en <https://www.inegi.org.mx/datosprimarios/iavl/>,
 usados bajo los [términos de libre uso del INEGI](https://www.inegi.org.mx/inegi/terminos.html).
-Este proyecto es independiente: el INEGI no lo respalda ni lo revisa.
+Totales nacionales para conciliar: Banco de Indicadores del INEGI.
+**Tipo de cambio: Banco de México, Sistema de Información Económica (SIE), serie
+SF43718 (FIX).** Este proyecto es independiente: el INEGI y el Banco de México no lo
+respaldan ni lo revisan.
 
-Transformaciones aplicadas a los datos del INEGI (se amplía en cada iteración):
+Transformaciones aplicadas:
 
-- Los zips se guardan tal como se publicaron; cada publicación se conserva como una
-  foto separada, identificada por su fecha `modified`.
-- En la capa curated: se recortan espacios al inicio y al final de cada valor, se fijan
-  tipos, se agregan el modelo sin el guion final y una clave en minúsculas (el nombre
-  original se conserva), se suman las filas repetidas por clave natural (0.110 % de
-  las unidades de ventas) y se marcan las correcciones negativas. No se cambia ningún
-  valor de unidades. Detalle en [docs/reglas_curated.md](docs/reglas_curated.md).
-- Los fixtures de prueba son recortes de filas de dos publicaciones, sin cambiar
-  ningún valor (ver [tests/fixtures/README.md](tests/fixtures/README.md)).
+- Los zips y las respuestas de las APIs se guardan tal como llegaron; cada publicación es
+  una foto separada.
+- En curated se recortan espacios, se fijan tipos, se agregan el modelo sin el guion
+  final y una clave en minúsculas (el nombre original se conserva), se suman las filas
+  repetidas por clave natural (0.11 % de las unidades de ventas) y se marcan las
+  correcciones negativas. No se cambia ningún valor de unidades.
+- En el warehouse, `JETOUR` se agrupa con `Jetour Soueast` y `Mercedes Benz_Prod_Expo`
+  con `Mercedes Benz` (semilla versionada); el tipo de cambio se resume por mes (promedio
+  y último día hábil).
+- Para entrenar el pronóstico, marzo a junio de 2020 se reemplazan por una trayectoria
+  sin confinamiento; las cifras reportadas nunca se ajustan.
+- Los fixtures de prueba son recortes de filas de dos publicaciones, sin cambiar valores
+  ([tests/fixtures/README.md](tests/fixtures/README.md)).
 
-Tipo de cambio: Banco de México, Sistema de Información Económica (SIE), serie
-SF43718 (tipo de cambio FIX). Se guarda la respuesta tal como llega y, en curated, el
-dato diario y, por mes, el promedio y el dato del último día hábil.
+## Licencia
 
-## Capa raw
-
-Cada publicación del INEGI se guarda como una foto, sin tocarla:
-
-```text
-raw/raiavl/<producto>/publication_date=AAAA-MM-DD/
-    conjunto_de_datos_raiavl_mensual_<producto>_csv.zip   el zip tal como llegó
-    metadatos_raiavl_<producto>_mensual_<años>.txt        copia del metadato
-    manifest.json                                          producto, modified, temporal, sha256 del zip y de cada archivo, tamaño, compresión, fecha de ingesta, nombre original y origen (archivo local o URL con sus cabeceras)
-```
-
-- El producto y la fecha (`modified`) se leen del metadato que trae el zip, no del
-  nombre del archivo.
-- Antes de guardar, se comprueba que sea un zip íntegro (CRC) con un metadato y CSV
-  del mismo producto. Se aceptan zips comprimidos y sin comprimir; la fuente ha
-  usado ambos.
-- Nunca se sobrescribe una foto. El manifiesto se escribe al final y marca que la
-  foto quedó completa. Si llega otro zip con la misma fecha `modified`:
-  - mismo zip (mismo sha256): no se hace nada;
-  - otro zip con los mismos archivos por dentro: no se escribe nada y se avisa. Pasa
-    cuando el INEGI regenera el zip sin cambiar datos: los bytes del zip cambian con
-    la compresión, la fecha interna de cada archivo y el orden;
-  - otro contenido (revisión silenciosa): la ingesta se detiene con error y lista
-    los archivos que cambiaron, aparecieron o faltan.
-
-```bash
-python -m inegi_market.cli ingest --zip data/samples/2026-10-07          # carpeta con los 4 zips
-python -m inegi_market.cli ingest --zip ruta/al/archivo.zip --zip otra/carpeta
-```
-
-## Detector de publicación nueva y descarga
-
-Los 4 zips tienen URL fija, así que una publicación nueva se detecta por las
-cabeceras HTTP, con un HEAD y sin descargar nada:
-
-```bash
-python -m inegi_market.cli check   # dice qué productos tienen publicación nueva; no escribe nada
-python -m inegi_market.cli fetch   # descarga e ingiere solo los que cambiaron
-```
-
-- `state/raiavl_head.json` (en el lake) guarda, por producto, el `Last-Modified`, el
-  `ETag` y la fecha de publicación de la última versión que quedó en raw. Solo se
-  actualiza después de ingerir; si algo falla, la siguiente ejecución lo reintenta.
-- El servidor del INEGI responde desde varias réplicas, cada una con su propio
-  `ETag` y un `Last-Modified` que difiere unos segundos para el mismo archivo
-  (medido: hasta 4 s). Por eso una publicación es nueva solo si `Last-Modified` se
-  mueve más de 10 minutos; el `ETag` se usa para la petición condicional (304).
-  `Content-Length` no se usa: cambió cuando el INEGI dejó de comprimir los zips.
-- La descarga va a un archivo temporal, se verifica el tamaño contra
-  `Content-Length` y se ingiere con las reglas de la capa raw. El zip debe ser del
-  producto de su URL.
-- Reintentos con espera (5 s y 10 s) ante errores de red, HTTP 5xx o 429 y descargas
-  incompletas. Un 4xx no se reintenta.
-- Si hay publicación nueva pero la descarga falla (por ejemplo, un 403), `fetch`
-  termina con código 1 y lo dice: el zip se descarga en el navegador y se sube con
-  `ingest --zip`, o se corre `fetch` desde una red donde la descarga funcione. Un
-  producto que falla no detiene a los demás.
-
-## Capa curated
-
-```bash
-python -m inegi_market.cli curate                                   # todas las fotos de raw
-python -m inegi_market.cli curate --product venta --publication-date 2026-10-07
-```
-
-Convierte cada foto en Parquet tipado: `curated/<producto>/publication_date=D/anio=AAAA/`,
-con los catálogos en `curated/catalogos/` y un reporte por foto en `reports/curate/`.
-Cada fila conserva `estatus` y `publication_date`. Las filas repetidas por clave natural
-se suman (`filas_origen` dice cuántas eran), los negativos se conservan con
-`es_correccion = true` y los ceros se conservan. Columnas, claves y reglas:
-[docs/reglas_curated.md](docs/reglas_curated.md).
-
-Antes de escribir, los **contratos de datos** revisan la foto: columnas y tipos, claves
-sin valor o repetidas, mes 1–12, estatus permitidos, continuidad contra el periodo que
-declara el metadato, códigos que existan en los catálogos y que no desaparezca una marca
-grande de ventas. Un error detiene el lote sin escribir nada; las advertencias (caída de
-marcas con ventas, muchas correcciones negativas, secuencia de estatus inesperada) quedan
-en el log y en el reporte. Si una marca grande dejó de vender de verdad, se reconoce con
-`curate --acknowledge-exit MARCA`. Reglas y calibración: [docs/contratos.md](docs/contratos.md).
-
-## Conciliación y tipo de cambio
-
-```bash
-python -m inegi_market.cli reconcile   # suma mensual de curated contra la API del INEGI
-python -m inegi_market.cli fx          # tipo de cambio FIX de Banxico a raw y curated
-```
-
-- **Conciliación.** Para ventas, producción y exportación compara, mes por mes, la suma de
-  la foto curated más reciente (o la de `--publication-date`) con los totales nacionales
-  del Banco de Indicadores del INEGI (indicadores 6207131346, 6207131345 y 6207131349).
-  Tolerancia: 0 en producción y exportación, ±0.01 % en ventas. El resultado siempre se
-  escribe en `curated/recon/` con ambas cifras, la diferencia y el veredicto (`cuadra`,
-  `dentro_de_tolerancia`, `fuera_de_tolerancia`, `sin_dato_api`, `sin_dato_csv`); si un
-  mes queda fuera de tolerancia, el comando termina con código 1 y lista esos meses. La
-  API suele traer un mes que los zips aún no: queda como `sin_dato_csv` y no es error.
-  `OBS_VALUE` se lee como `Decimal`, nunca como `float`.
-- **Tipo de cambio.** Descarga la serie diaria desde 2005 y escribe
-  `curated/tipo_cambio_diario/` y `curated/tipo_cambio_mensual/` (promedio y último día
-  hábil, con `mes_completo` en falso para el mes en curso). Un día sin valor numérico se
-  omite y se cuenta.
-- **Tokens.** Solo se leen de `INEGI_TOKEN` y `BANXICO_TOKEN`. Sin token, el comando se
-  detiene antes de llamar a la API. El token del INEGI va en la URL, así que la URL nunca
-  se registra y el token se borra de cualquier mensaje y de la respuesta guardada en raw.
-
-## Diff entre publicaciones
-
-```bash
-python -m inegi_market.cli diff                                   # las dos fotos más recientes
-python -m inegi_market.cli diff --product venta --before 2026-09-09 --after 2026-10-07
-```
-
-Compara dos fotos curated al grano año, mes, marca y modelo normalizado (`modelo_clave`);
-en híbridos, año, mes y entidad. La clave fina (origen, segmento, país, nombre original)
-no es estable entre publicaciones, por eso no se compara a ese nivel. Cada fila que cambió
-se clasifica en:
-
-- `mes_nuevo`: el mes no existía en la foto anterior;
-- `reclasificacion`: el total de la fila no cambia y solo se movieron unidades por dentro
-  (origen, segmento, país, variante del nombre o, en híbridos, tipo de vehículo), o el
-  total cambia pero lo compensan otros modelos de la misma marca en el mismo mes;
-- `revision_real`: cambia el total de la marca en el mes (en híbridos, de la entidad);
-- `cambio_de_estatus`: registro aparte, porque puede coincidir con un cambio de valor.
-
-Salidas: `curated/snapshot_changes/` (una fila por cambio, con unidades antes y después,
-unidades movidas y el detalle de las claves finas), `curated/snapshot_summary/` (un
-renglón por tipo de cambio más `total_historia`, el efecto neto sobre los meses que ya
-estaban) y `reports/diff/`. Limitación: si una marca mueve unidades entre modelos y además
-revisa su total en el mismo mes, todas sus filas con cambio de total salen como revisión
-real; el resumen sí da el neto correcto.
-
-## Pronóstico
-
-```bash
-python -m inegi_market.cli forecast
-```
-
-Ventas nacionales y de las 5 marcas más grandes, a 1–6 meses. Cuatro modelos: ingenuo
-estacional (línea base obligatoria), ETS, SARIMA y SARIMAX con el tipo de cambio rezagado
-6 meses. Se valida con origen móvil: cada pronóstico usa solo datos hasta su origen y se
-evalúan los meses de 2023-01 a 2026-09. Marzo a junio de 2020 (confinamiento) se
-reemplazan, solo para entrenar, por una trayectoria sin confinamiento.
-
-**Quién gana y por cuánto** (MASE; menor es mejor, la base es el ingenuo estacional):
-
-| Serie | 1–3 meses | 1–6 meses |
-| --- | --- | --- |
-| Nacional | SARIMA, 0.527 contra 1.087 (−52 %; error medio 4.5 %) | SARIMA, 0.648 contra 1.093 (−41 %; 5.6 %) |
-| Nissan | SARIMA, −29 % | ETS, −14 % |
-| General Motors | SARIMAX con tipo de cambio, −14 % | SARIMAX con tipo de cambio, −6 % |
-| Volkswagen | ETS, −41 % | ETS, −29 % |
-| Toyota | SARIMAX con tipo de cambio, −24 % | SARIMAX con tipo de cambio, −24 % |
-| KIA | ETS, −28 % | SARIMAX con tipo de cambio, −21 % |
-
-El ganador le gana a la base en todas las series. No todos los modelos lo hacen: en General
-Motors, ETS no le gana. El tipo de cambio rezagado aporta poco y no siempre: mejora a
-SARIMA en General Motors, Toyota y KIA y lo empeora en la serie nacional, Nissan y
-Volkswagen. Sin el ajuste de 2020, en KIA ningún modelo le gana a la base. Método,
-tablas completas y limitaciones: [docs/pronostico.md](docs/pronostico.md).
-
-## Warehouse y marts
-
-```bash
-python -m inegi_market.cli warehouse            # BigQuery (INEGI_MARKET_BACKEND=gcs)
-python -m inegi_market.cli warehouse --local    # el mismo SQL en DuckDB: data/warehouse.duckdb
-```
-
-Tablas externas sobre `curated/`, hechos con la foto más reciente de cada producto
-(particionados por mes), dimensiones (`dim_fecha`, `dim_marca` con nombre canónico de una
-semilla versionada y vigencia medida en los datos, `dim_modelo`, `dim_pais`,
-`dim_entidad`) y 12 vistas en `raiavl_marts` para el dashboard: ventas y variaciones,
-participación por marca, estacionalidad, nacional contra importado, segmentos, tipo de
-cambio, industria, híbridos, conciliación y revisiones. Todo es `CREATE OR REPLACE`.
-`--local` traduce el SQL con sqlglot y lo ejecuta en DuckDB sobre el lake local (extra
-`local`), así el SQL se verifica con datos reales sin GCP. Detalle:
-[docs/warehouse.md](docs/warehouse.md).
+El código se distribuye bajo la licencia MIT ([LICENSE](LICENSE)). Los datos son del
+INEGI y del Banco de México y se usan bajo sus propios términos (ver
+[Fuentes y atribución](#fuentes-y-atribución)).
 
 ## Desarrollo
 
@@ -238,13 +278,8 @@ python -m venv .venv
 pip install -e ".[dev]"
 pytest -q
 ruff check .
-python -m inegi_market.cli --help
 ```
 
-Configuración por variables de entorno: `INEGI_MARKET_BACKEND` (`local` o `gcs`),
-`INEGI_MARKET_DATA_DIR` (lake local, por defecto `data/lake`), `INEGI_MARKET_BUCKET`,
-`INEGI_MARKET_PROJECT`. Los tokens `INEGI_TOKEN` y `BANXICO_TOKEN` solo se leen del
-entorno o de Secret Manager; nunca van en el repositorio.
-
-`tools/probar_apis.py` es el script con el que se probaron las APIs del INEGI y de
-Banxico antes de escribir el pipeline (solo lectura, tokens desde el entorno).
+`tools/make_fixtures.py` regenera los fixtures a partir de los zips reales
+([fixtures](tests/fixtures/README.md)). `tools/probar_apis.py` es una prueba de humo de
+las APIs del INEGI y de Banxico con los tokens del entorno.

@@ -22,7 +22,7 @@ from .http_client import DownloadError, HttpClient, default_sleep, with_retries
 
 BASE_URL = "https://www.inegi.org.mx/app/api/indicadores/desarrolladores/jsonxml/INDICATOR/"
 TOKEN_ENV = "INEGI_TOKEN"
-# Totales nacionales de vehículos ligeros (confirmados por el autor en la Fase 0).
+# Totales nacionales de vehículos ligeros: ventas, producción y exportación.
 INDICATORS = {"venta": "6207131346", "produccion": "6207131345", "exportacion": "6207131349"}
 
 

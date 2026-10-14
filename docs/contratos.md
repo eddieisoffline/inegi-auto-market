@@ -3,8 +3,8 @@
 Los contratos revisan cada foto **antes** de escribirla en curated. Un **error** detiene
 el lote: no se escribe nada en `curated/` ni en `reports/`, y el comando termina con
 código 1. Una **advertencia** se registra en el log y en el reporte de la foto
-(`contract_warnings`), y el lote sigue. Código: [`src/inegi_market/validate.py`](../src/inegi_market/validate.py),
-funciones puras con el patrón del Proyecto 1 (`Issue`, `ValidationError`, `ensure_valid`).
+(`contract_warnings`), y el lote sigue. Código: [`src/inegi_market/validate.py`](../src/inegi_market/validate.py), con
+funciones puras (`Issue`, `ValidationError`, `ensure_valid`).
 
 Las columnas y claves esperadas se declaran en `validate.py`, aparte de `curate.py`, para
 que el contrato sea una especificación independiente del código que produce los datos.
@@ -27,7 +27,8 @@ Una prueba verifica que ambas coincidan.
 | Correcciones negativas | advertencia | Ventas, producción y exportación. El último mes trae más de 5 filas con unidades negativas. |
 | Secuencia de estatus | advertencia | Lo observado en las fotos reales: los estatus van en orden en el tiempo (definitivas, luego revisadas, luego preliminares), ningún mes mezcla estatus y las preliminares solo están en el último mes. Si cambia puede ser un cambio de proceso del INEGI, no un dato defectuoso. |
 
-La conciliación de totales contra la API del INEGI llega en la iteración 5.
+La conciliación de totales contra la API del INEGI no es un contrato: corre después,
+con [`reconcile`](operacion.md#reconcile).
 
 ### Interpretaciones
 
@@ -52,7 +53,7 @@ La conciliación de totales contra la API del INEGI llega en la iteración 5.
 | `acknowledged_exits` | ninguna (se llena con `--acknowledge-exit`) |
 | `check_continuity` | sí (las pruebas lo apagan solo para los fixtures, que son una muestra de meses) |
 
-## Calibración con los datos reales (2026-10-08)
+## Calibración con datos reales
 
 - **Las dos fotos reales (8 zips) pasan todos los contratos sin advertencias.**
 - **Repetición histórica.** Se aplicaron las reglas de cobertura y correcciones como si

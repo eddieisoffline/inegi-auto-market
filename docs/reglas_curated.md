@@ -6,8 +6,8 @@ espacios, normaliza el nombre del modelo en columnas nuevas y suma las filas que
 fuente repite. Código: [`src/inegi_market/curate.py`](../src/inegi_market/curate.py).
 
 ```bash
-python -m inegi_market.cli curate                                   # todas las fotos de raw
-python -m inegi_market.cli curate --product venta --publication-date 2026-10-07
+inegi-market curate                                   # todas las fotos de raw
+inegi-market curate --product venta --publication-date 2026-10-07
 ```
 
 ## Salida
@@ -56,8 +56,10 @@ Correspondencia con la fuente: `ANIO` → `anio`, `ID_MES` → `mes`, `MARCA` �
      (`"Serie 2-"` → `"Serie 2"`). No se cambian mayúsculas.
    - `modelo_clave`: `modelo` en minúsculas y con espacios internos simples, para unir
      (`"Mdx"` → `"mdx"`).
-5. **Duplicados por clave natural: se suman** (decisión del autor, 2026-10-07).
-   `filas_origen` dice cuántas filas de la fuente forman cada fila curated.
+5. **Duplicados por clave natural: se suman.** Unos son duplicados exactos con cero
+   unidades y otros parecen líneas separadas del mismo modelo, así que eliminarlos
+   perdería unidades reales. `filas_origen` dice cuántas filas de la fuente forman
+   cada fila curated.
 
    | Producto | Clave natural |
    | --- | --- |
@@ -100,7 +102,9 @@ duplicados, total de unidades, filas con corrección negativa, filas con cero
 unidades, primer y último periodo, filas con modelo terminado en guion y archivos
 escritos.
 
-## Verificación con las dos fotos reales (2026-10-08)
+## Validación con datos reales
+
+Con las publicaciones del 2026-09-09 y del 2026-10-07:
 
 | Producto | Foto 2026-09-09 | Foto 2026-10-07 |
 | --- | --- | --- |
@@ -111,7 +115,7 @@ escritos.
 
 - Los totales mensuales de curated cuadran con la suma directa de los CSV en las 8
   fotos, en todos los meses.
-- Coinciden con las cifras oficiales anotadas: septiembre de 2026 (ventas 129,274;
+- Coinciden con las cifras oficiales publicadas: septiembre de 2026 (ventas 129,274;
   producción 301,803; exportación 277,369), agosto de 2026 (ventas 129,362 en la foto
   de septiembre y 129,361 en la de octubre) y mayo de 2025 (ventas 121,110; producción
   356,188; exportación 301,112).

@@ -4,16 +4,16 @@ Un pronóstico a 1–6 meses que dice cuánto se equivoca. Código:
 [`src/inegi_market/forecast.py`](../src/inegi_market/forecast.py).
 
 ```bash
-python -m inegi_market.cli forecast                     # backtest, métricas y próximos 6 meses
-python -m inegi_market.cli forecast --sin-ajuste-2020   # para comparar el tratamiento de 2020
+inegi-market forecast                     # backtest, métricas y próximos 6 meses
+inegi-market forecast --sin-ajuste-2020   # para comparar el tratamiento de 2020
 ```
 
 ## Series y modelos
 
 - **Series:** ventas nacionales mensuales y las de las 5 marcas con más ventas en los
-  últimos 12 meses (hoy: Nissan, General Motors, Volkswagen, Toyota y KIA), de la foto
-  curated más reciente. Cada serie de marca empieza en su primer mes con ventas
-  (KIA llega en 2015-07).
+  últimos 12 meses (con datos hasta 2026-09: Nissan, General Motors, Volkswagen, Toyota
+  y KIA), de la foto curated más reciente. Cada serie de marca empieza en su primer mes
+  con ventas (KIA llega en 2015-07).
 - **Modelos:**
 
 | Modelo | Qué es |

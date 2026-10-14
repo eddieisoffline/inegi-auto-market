@@ -1,6 +1,6 @@
 # Fixtures de prueba
 
-Recortes pequeños de las dos publicaciones reales del RAIAVL que conserva el autor
+Recortes pequeños de dos publicaciones reales del RAIAVL
 (`modified: 2026-09-09` y `modified: 2026-10-07`). Fuente: INEGI, Registro
 Administrativo de la Industria Automotriz de Vehículos Ligeros (RAIAVL), datos
 abiertos bajo los términos de libre uso del INEGI
@@ -8,6 +8,7 @@ abiertos bajo los términos de libre uso del INEGI
 modificó ningún valor.
 
 ## Estructura
+
 `raiavl/<foto>/<producto>/` reproduce el interior de cada zip:
 `conjunto_de_datos/` (solo los años con filas seleccionadas), `catalogos/` y
 `metadatos/` (copiado tal cual). Las líneas son byte a byte las del CSV original
@@ -18,15 +19,17 @@ Los zips no se versionan (`*.zip` está en `.gitignore`): las pruebas los arman 
 memoria con `build_zip` de `tests/conftest.py`, en modo Stored o Deflated.
 
 ## Regenerar
+
 Con los zips reales en `data/samples/<foto>/`:
 
-```
+```bash
 python tools/make_fixtures.py
 ```
 
 Es determinista: si la fuente no cambió, `git diff` queda vacío.
 
 ## Casos incluidos a propósito
+
 Las mismas reglas se aplican a ambas fotos (ver `RULES` en `tools/make_fixtures.py`).
 
 | Producto | Caso | Filas |

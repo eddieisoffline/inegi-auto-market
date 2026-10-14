@@ -78,7 +78,7 @@ def parse_rates(body: bytes) -> tuple[list[DailyRate], int]:
 
 
 def monthly_rates(rates: list[DailyRate], retrieved: date) -> list[MonthlyRate]:
-    """Promedio mensual y dato del último día hábil, los dos (PLAN, iteración 5)."""
+    """Promedio mensual y dato del último día hábil de cada mes."""
     by_month: dict[tuple[int, int], list[DailyRate]] = {}
     for rate in rates:
         by_month.setdefault((rate.fecha.year, rate.fecha.month), []).append(rate)

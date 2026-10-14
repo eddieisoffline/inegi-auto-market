@@ -4,8 +4,8 @@
     curated/recon/<producto>/publication_date=P/part-0.parquet      un renglón por mes
     reports/reconcile/<producto>/publication_date=P.json            resumen
 
-Tolerancia (decisión del autor, 2026-10-07): 0 en producción y exportación, ±0.01 % en
-ventas. El resultado siempre se escribe, con ambas cifras, la diferencia y el veredicto.
+Tolerancia: 0 en producción y exportación, ±0.01 % en ventas. El resultado siempre se
+escribe, con ambas cifras, la diferencia y el veredicto.
 Si algún mes queda fuera de tolerancia, después de escribir se lanza
 `ReconciliationError` con el detalle de esos meses.
 

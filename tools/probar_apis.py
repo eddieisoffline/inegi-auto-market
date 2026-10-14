@@ -1,9 +1,9 @@
-"""Prueba de las APIs del proyecto 2 (Fase 0). Solo lectura, sin dependencias externas.
+"""Prueba de humo de las APIs del INEGI y de Banxico. Solo lectura, sin dependencias externas.
 
 Uso (PowerShell):
     $env:INEGI_TOKEN   = "<tu token del INEGI>"
     $env:BANXICO_TOKEN = "<tu token de Banxico>"
-    python probar_apis.py
+    python tools/probar_apis.py
 
 Los tokens se leen de variables de entorno y nunca se imprimen.
 """
@@ -124,7 +124,7 @@ def main():
         sys.exit("Define INEGI_TOKEN y BANXICO_TOKEN como variables de entorno.")
     a = probar_inegi(inegi_t)
     b = probar_banxico(bmx_t)
-    resultado = "todo bien" if a and b else "hay fallas; pégame la salida (no contiene tokens)"
+    resultado = "todo bien" if a and b else "hay fallas; revisa la salida de arriba"
     print("\nResultado:", resultado)
 
 
