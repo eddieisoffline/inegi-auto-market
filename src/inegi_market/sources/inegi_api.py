@@ -43,7 +43,9 @@ class Observation:
 
 
 def read_token(env_var: str) -> str:
-    token = os.environ.get(env_var, "").strip()
+    # El BOM (U+FEFF) llega cuando el secreto se guardó desde PowerShell; no es un espacio
+    # para strip() y rompe la petición HTTP.
+    token = os.environ.get(env_var, "").replace("﻿", "").strip()
     if not token:
         raise MissingTokenError(f"falta el token: define la variable de entorno {env_var}")
     return token

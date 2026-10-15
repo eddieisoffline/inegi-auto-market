@@ -4,7 +4,7 @@ on:
   push:
   pull_request:
 
-# Permisos mínimos: el job solo lee el repositorio.
+# Permisos mínimos por defecto; el job de despliegue pide los suyos aparte.
 permissions:
   contents: read
 
@@ -19,3 +19,70 @@ jobs:
       - run: pip install -e ".[dev]"
       - run: ruff check .
       - run: pytest -q
+
+  terraform:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/terraform
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.16.4"
+      - run: terraform fmt -check -diff
+      - run: terraform init -backend=false -input=false
+      - run: terraform validate
+
+  deploy:
+    needs: [test, terraform]
+    # Solo en push a main y solo si el repositorio ya tiene configurada la identidad de GCP
+    # (variables de Actions). En cualquier otro caso se omite.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.GCP_WORKLOAD_IDENTITY_PROVIDER != ''
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write # token OIDC con el que se autentica en GCP, sin llaves guardadas
+    env:
+      PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      REGION: ${{ vars.GCP_REGION }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOYER_SA }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configurar Docker para Artifact Registry
+        run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+
+      - name: Nombre de la imagen
+        id: image
+        run: echo "ref=${REGION}-docker.pkg.dev/${PROJECT_ID}/inegi-market/inegi-market:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      # La caché de GitHub Actions reutiliza la capa de dependencias entre builds: si
+      # pyproject.toml no cambió, la imagen solo agrega la capa del código.
+      - name: Construir y subir la imagen
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.image.outputs.ref }}
+          provenance: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Actualizar el Cloud Run Job
+        run: |
+          gcloud run jobs update inegi-market \
+            --image "${{ steps.image.outputs.ref }}" \
+            --region "$REGION" \
+            --project "$PROJECT_ID"

@@ -1,0 +1,27 @@
+# Copia este archivo a terraform.tfvars (ignorado por git) y ajústalo.
+project_id  = "tu-proyecto-gcp"
+region      = "us-central1"
+lake_bucket = "tu-bucket-del-lake"
+
+# Ubicación del bucket y de los datasets: deben coincidir.
+# lake_location = "US"
+# bq_location   = "US"
+
+# Paso 1: infraestructura base. Paso 2: sube la imagen y cambia a true.
+deploy_job = false
+# image    = "us-central1-docker.pkg.dev/tu-proyecto-gcp/inegi-market/inegi-market:0.2.0"
+
+# Opcional: despliegue automático desde GitHub Actions (owner/repo)
+# github_repository = "eddieisoffline/inegi-auto-market"
+
+# Opcional: correo que recibe la alerta cuando una ejecución del job falla
+# alert_email = "tu-correo@example.com"
+
+# Opcional: presupuesto mensual. Déjalo vacío si el proyecto ya tiene uno.
+# billing_account_id = "XXXXXX-XXXXXX-XXXXXX"
+# budget_amount      = 100
+# budget_currency    = "MXN"
+
+# Solo para borrar todo: true permite que terraform destroy elimine el bucket y los
+# datasets con sus datos (ver docs/despliegue.md).
+# force_destroy = true

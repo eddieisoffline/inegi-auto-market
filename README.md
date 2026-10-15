@@ -148,6 +148,8 @@ inegi-market fx                   # tipo de cambio de Banxico
 inegi-market diff                 # qué cambió entre las dos publicaciones más recientes
 inegi-market forecast             # pronóstico con backtesting (~75 s)
 inegi-market warehouse --local    # warehouse en DuckDB: data/warehouse.duckdb
+
+inegi-market run                  # todo lo anterior en un paso, si hay publicación pendiente
 ```
 
 Para BigQuery: `INEGI_MARKET_BACKEND=gcs`, `INEGI_MARKET_BUCKET` e
@@ -162,6 +164,7 @@ estructura del lake y la solución de problemas están en
 | [docs/README.md](docs/README.md) | índice de la documentación |
 | [arquitectura.md](docs/arquitectura.md) | flujo, capas del lake, módulos y principios de diseño |
 | [operacion.md](docs/operacion.md) | instalación, configuración, comandos, ciclo mensual y solución de problemas |
+| [despliegue.md](docs/despliegue.md) | infraestructura en GCP con Terraform, despliegue por SHA y operación del job |
 | [reglas_curated.md](docs/reglas_curated.md) | columnas, claves y normalización de la capa curated |
 | [contratos.md](docs/contratos.md) | reglas de validación y su calibración con la historia |
 | [warehouse.md](docs/warehouse.md) | tablas, dimensiones y marts de BigQuery |

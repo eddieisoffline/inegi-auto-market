@@ -59,6 +59,7 @@ con un mensaje que dice qué hacer. Un argumento inválido termina con código 2
 
 | Comando | Qué hace |
 | --- | --- |
+| [`run`](#run) | Ciclo completo: descarga y, si hay una publicación pendiente, procesa hasta el warehouse |
 | [`check`](#check) | Pregunta con HEAD si el INEGI publicó algo nuevo; no descarga |
 | [`fetch`](#fetch) | Descarga e ingiere los zips que cambiaron |
 | [`ingest`](#ingest) | Guarda zips locales en `raw/` sin sobrescribir |
@@ -172,6 +173,28 @@ tratamiento de 2020, para comparar. `--workers` fija los procesos en paralelo, u
 serie; con 0 se usan los núcleos disponibles. Tarda alrededor de 75 s. Método:
 [pronostico.md](pronostico.md).
 
+### run
+
+```bash
+inegi-market run [--force] [--acknowledge-exit MARCA ...] [--workers N]
+```
+
+El ciclo completo, que es lo que corre el job programado ([despliegue.md](despliegue.md)):
+
+1. `fetch`. Si una descarga falla, termina con código 1 sin procesar nada.
+2. Busca publicaciones en raw que no hayan terminado el ciclo según
+   `state/pipeline.json`. Sin ese archivo, solo cuenta la más reciente. Si no hay
+   ninguna, termina con código 0.
+3. Cura solo las publicaciones pendientes y corre `reconcile`, `fx`, `diff`, `forecast` y
+   `warehouse` (BigQuery con `INEGI_MARKET_BACKEND=gcs`; DuckDB en
+   `data/warehouse.duckdb` con `local`).
+4. Escribe `state/pipeline.json` con la publicación procesada y la duración de cada
+   paso, solo si todo terminó.
+
+Si un paso falla, la publicación sigue pendiente y la siguiente ejecución la retoma sin
+volver a descargar. `--force` reprocesa la publicación más reciente aunque ya esté
+registrada. `--acknowledge-exit` y `--workers` se pasan a `curate` y a `forecast`.
+
 ### warehouse
 
 ```bash
@@ -191,7 +214,8 @@ comando lo produce.
 
 ## Ciclo mensual
 
-El INEGI publica una vez al mes. Con una publicación nueva:
+El INEGI publica una vez al mes. `inegi-market run` hace el ciclo completo y es lo que
+corre el job programado. Paso a paso, con una publicación nueva:
 
 ```bash
 inegi-market fetch        # descarga lo nuevo (o: ingest --zip RUTA)
@@ -215,6 +239,7 @@ corte no deja archivos a medias.
 | --- | --- | --- |
 | `raw/raiavl/<producto>/publication_date=D/` | `ingest`, `fetch` | zip original, metadato `.txt` y `manifest.json` (se escribe al final) |
 | `state/raiavl_head.json` | `fetch` | JSON con `Last-Modified` y `ETag` de la última versión descargada |
+| `state/pipeline.json` | `run` | JSON con la última publicación que terminó el ciclo y la duración de cada paso |
 | `curated/<producto>/publication_date=D/anio=AAAA/part-0.parquet` | `curate` | Parquet, un archivo por año |
 | `curated/catalogos/<dim>/publication_date=D/part-0.parquet` | `curate` | Parquet: `dim_mes`, `dim_pais_origen`, `dim_pais_destino` y `dim_entidad` |
 | `reports/curate/<producto>/publication_date=D.json` | `curate` | JSON |
@@ -236,6 +261,8 @@ las tablas y vistas en BigQuery.
 
 | Mensaje o síntoma | Causa | Qué hacer |
 | --- | --- | --- |
+| Correo "inegi-market: ejecución fallida" | Una ejecución del job terminó con error | El log de la ejecución dice qué paso falló; la causa es una de las filas de esta tabla. La publicación sigue pendiente y la ejecución siguiente la retoma |
+| `run`: "descarga fallida" | `fetch` no pudo descargar un zip | Igual que la fila de `fetch`; con el lake en Cloud Storage, ingerir con `INEGI_MARKET_BACKEND=gcs` ([despliegue.md](despliegue.md#operación)) |
 | `fetch`: `failed` con HTTP 403, corte de red o "descarga incompleta" | El servidor del INEGI rechaza la red o la descarga se cortó | Descargar el zip en el navegador e ingerirlo con `inegi-market ingest --zip RUTA`, o correr `fetch` desde otra red |
 | `ingest` o `fetch`: "ya hay una foto guardada con otro contenido y la misma fecha 'modified'" | El INEGI regeneró la publicación con cambios sin mover su fecha | El pipeline no sobrescribe. El mensaje lista los archivos que cambiaron; la foto guardada sigue siendo la que usa el análisis |
 | Advertencia "mismo contenido con otro empaquetado" | El zip se volvió a empaquetar (por ejemplo, con otra compresión) | Nada: no se escribe nada |

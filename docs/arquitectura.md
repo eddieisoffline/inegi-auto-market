@@ -35,8 +35,18 @@ flowchart LR
 ```
 
 Cada etapa es un comando de la CLI (`check`, `fetch`, `curate`, `reconcile`, `fx`,
-`diff`, `forecast` y `warehouse`). Qué lee y qué escribe cada uno, su configuración y el
-ciclo mensual están en [operacion.md](operacion.md).
+`diff`, `forecast` y `warehouse`), y `run` encadena el ciclo completo. Qué lee y qué
+escribe cada uno, su configuración y el ciclo mensual están en
+[operacion.md](operacion.md).
+
+## Ejecución en la nube
+
+Un Cloud Run Job corre `inegi-market run` todos los días, disparado por Cloud
+Scheduler. Casi siempre solo pregunta al INEGI si hay algo nuevo y termina en segundos;
+con una publicación nueva corre el ciclo completo sobre el lake en Cloud Storage y
+refresca BigQuery. La infraestructura está en Terraform, los tokens en Secret Manager y
+cada push a `main` publica una imagen etiquetada con el SHA del commit. Detalle:
+[despliegue.md](despliegue.md).
 
 ## Capas del lake
 
@@ -70,6 +80,7 @@ La ruta completa de cada archivo y el comando que lo escribe están en
 | `diff.py` | cambios entre fotos clasificados por causa |
 | `forecast.py` | pronóstico con backtesting ([pronóstico](pronostico.md)) |
 | `warehouse.py` + `sql/` | warehouse en BigQuery o DuckDB ([warehouse](warehouse.md)) |
+| `pipeline.py` | ciclo completo y registro de la última publicación procesada |
 | `cli.py` | línea de comandos |
 
 ## Principios de diseño

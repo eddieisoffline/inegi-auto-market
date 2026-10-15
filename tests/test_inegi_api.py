@@ -66,6 +66,15 @@ def test_missing_token_is_a_clear_error(monkeypatch):
         read_token("INEGI_TOKEN")
 
 
+def test_token_ignores_bom_and_line_breaks(monkeypatch):
+    # Así llega un secreto guardado con PowerShell: BOM al inicio y CRLF al final.
+    monkeypatch.setenv("INEGI_TOKEN", f"﻿{INEGI_TOKEN}\r\n")
+    assert read_token("INEGI_TOKEN") == INEGI_TOKEN
+    monkeypatch.setenv("INEGI_TOKEN", "﻿\r\n")
+    with pytest.raises(MissingTokenError):
+        read_token("INEGI_TOKEN")
+
+
 def test_fetch_indicator_returns_body_and_observations():
     body = inegi_body({(2026, 9): "129274.00000000000000000000"})
     api = FakeApi({"6207131346": [(200, body)]})

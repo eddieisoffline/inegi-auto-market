@@ -11,6 +11,7 @@ from .diff import DiffError, diff_latest
 from .forecast import ForecastConfig, ForecastError, run_forecast
 from .fx import update_fx
 from .ingest import IngestError, find_zips, ingest_file
+from .pipeline import PipelineError, RunConfig, run_pipeline
 from .reconcile import ReconciliationError, reconcile
 from .sources.http_client import HttpClient, UrllibClient
 from .sources.inegi_api import INDICATORS, ApiError
@@ -95,6 +96,23 @@ def build_parser() -> argparse.ArgumentParser:
     p_fc.add_argument("--workers", type=int, default=0,
                       help="procesos en paralelo, uno por serie (0: según los núcleos)")
 
+    p_run = sub.add_parser(
+        "run", help="ciclo completo: descarga y, si hay publicación pendiente, procesa hasta "
+                    "el warehouse"
+    )
+    p_run.add_argument("--force", action="store_true",
+                       help="reprocesa la publicación más reciente aunque ya esté procesada")
+    p_run.add_argument(
+        "--acknowledge-exit",
+        dest="acknowledged_exits",
+        action="append",
+        default=[],
+        metavar="MARCA",
+        help="marca grande que dejó de vender y ya se revisó; se puede repetir",
+    )
+    p_run.add_argument("--workers", type=int, default=0,
+                       help="procesos del pronóstico, uno por serie (0: según los núcleos)")
+
     p_wh = sub.add_parser("warehouse", help="refresca BigQuery desde curated/ (DuckDB con --local)")
     p_wh.add_argument(
         "--local", nargs="?", const="data/warehouse.duckdb", metavar="ARCHIVO",
@@ -173,6 +191,20 @@ def main(argv: list[str] | None = None, client: HttpClient | None = None) -> Non
         return
 
     client = client or UrllibClient()
+    if args.command == "run":
+        config = RunConfig(
+            force=args.force,
+            contract=ContractConfig(acknowledged_exits=frozenset(args.acknowledged_exits)),
+            forecast=ForecastConfig(workers=args.workers),
+        )
+        try:
+            run_pipeline(client, storage, Settings.from_env(), config)
+        except (PipelineError, CurateError, ValidationError, ApiError, ReconciliationError,
+                DiffError, ForecastError, WarehouseError) as exc:
+            log.error("run detenido: %s", exc)
+            raise SystemExit(1) from None
+        return
+
     if args.command in ("reconcile", "fx"):
         try:
             if args.command == "reconcile":

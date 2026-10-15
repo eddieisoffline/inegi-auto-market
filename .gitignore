@@ -11,7 +11,13 @@ data/
 # Guías locales para asistentes de IA: se conservan en disco, no se publican
 CLAUDE.md
 PLAN.md
-# Terraform: el estado y la caché de proveedores no se versionan
+# Terraform: el estado, la caché de proveedores y las variables locales no se versionan
+# (sí se versiona .terraform.lock.hcl)
 .terraform/
 *.tfstate
 *.tfstate.*
+terraform.tfvars
+# Planes guardados (terraform plan -out): contienen valores de la infraestructura
+tfplan
+*.tfplan
+plan.txt

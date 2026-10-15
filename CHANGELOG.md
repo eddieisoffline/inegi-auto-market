@@ -4,6 +4,24 @@ Los cambios relevantes del proyecto se documentan aquí. El formato sigue
 [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y el proyecto usa
 [versionado semántico](https://semver.org/lang/es/).
 
+## [Sin publicar]
+
+### Añadido
+
+- **Ciclo completo** (`run`): descarga y, si hay una publicación pendiente, cura,
+  concilia, actualiza el tipo de cambio, compara, pronostica y refresca el warehouse.
+  Registra la última publicación procesada en `state/pipeline.json` solo al terminar,
+  así que una falla deja la publicación pendiente para la ejecución siguiente.
+- **Infraestructura en Terraform**: bucket y datasets (importables si ya existen),
+  cuentas de servicio con mínimo privilegio, Secret Manager para los tokens, Artifact
+  Registry, Cloud Run Job, Cloud Scheduler diario, alerta por correo cuando una
+  ejecución falla, presupuesto opcional y Workload Identity Federation limitada al
+  repositorio y a `main`.
+- **Imagen de contenedor** (`Dockerfile`) con usuario sin privilegios.
+- **CI/CD**: validación de Terraform en cada push y despliegue por SHA desde GitHub
+  Actions.
+- **Documentación**: [despliegue.md](docs/despliegue.md).
+
 ## [0.1.0] - 2026-10-14
 
 Primera versión.
