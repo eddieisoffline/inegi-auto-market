@@ -98,6 +98,10 @@ El lake vive en una carpeta local o en Cloud Storage con el mismo código. El wa
 SQL de BigQuery que también corre en DuckDB sobre el lake local (traducido con sqlglot),
 así se valida con datos reales sin la nube. Detalle: [docs/arquitectura.md](docs/arquitectura.md).
 
+En Google Cloud corre como un Cloud Run Job diario: casi siempre solo pregunta al INEGI
+si hay algo nuevo; con una publicación nueva corre el ciclo completo y refresca BigQuery.
+La infraestructura está en Terraform ([docs/despliegue.md](docs/despliegue.md)).
+
 ## Alcance y validación
 
 | Componente | Validación con datos reales |
@@ -110,7 +114,9 @@ así se valida con datos reales sin la nube. Detalle: [docs/arquitectura.md](doc
 | Warehouse | 48 sentencias aplicadas en BigQuery; los marts dan los mismos resultados en BigQuery y en DuckDB |
 | Pronóstico | El modelo ganador le gana a la línea base en las 6 series y en los dos horizontes |
 | Dashboard | Seis páginas en Looker Studio sobre los marts de BigQuery |
-| CI | `ruff` y 239 pruebas sin red en cada push |
+| Ejecución programada | Cloud Run Job diario: desde la nube, los 4 zips llegaron idénticos a los ya guardados y el ciclo completo de la publicación del 2026-10-07 tardó 7 min 27 s (pronóstico 237 s, warehouse 96 s, curate 24 s); una ejecución fallida a mitad del ciclo se retomó sin volver a descargar |
+| CI/CD | `ruff`, 247 pruebas sin red y `terraform validate` en cada push; despliegue por SHA al job desde GitHub Actions |
+| Alertas | Correo cuando una ejecución del job falla, probado con dos ejecuciones fallidas |
 
 ## Decisiones de diseño
 
@@ -225,19 +231,16 @@ producidos y 277,369 exportados.
   modelo con rezago fijo, no un modelo causal.
 - **Producción y exportación reportan grupos** ("BMW Group", "Ford Motor") que no se
   igualan a las marcas de ventas.
-- **Sin ejecución programada:** cada publicación se procesa corriendo el ciclo mensual de
-  comandos. La descarga desde Cloud Run no está probada; desde Cloud Shell el servidor
-  del INEGI responde.
+- **El estado de Terraform es local:** alcanza para un solo operador; para trabajar desde
+  varias máquinas o desde CI se mueve a un bucket (el bloque está comentado en
+  `infra/terraform/versions.tf`).
 
 ## Hoja de ruta
 
-- Infraestructura como código con Terraform: bucket, datasets, cuentas de servicio,
-  Secret Manager para los tokens y Artifact Registry.
-- Imagen de contenedor y Cloud Run Job con el ciclo mensual, disparado por Cloud
-  Scheduler, con despliegue por SHA desde GitHub Actions.
-- Prueba de la descarga de los zips desde Cloud Run.
 - Confirmar la ventana móvil de 36 meses de las cifras definitivas con las publicaciones
-  de noviembre de 2026 y febrero de 2027.
+  de noviembre de 2026 y febrero de 2027, que el job procesará solo.
+- Estado remoto de Terraform en Cloud Storage.
+- Logs estructurados (JSON) para filtrar por severidad en Cloud Logging.
 
 ## Fuentes y atribución
 

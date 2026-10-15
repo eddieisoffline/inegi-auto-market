@@ -4,11 +4,11 @@ title:
   en: "Mexico's Auto Market with Live INEGI Data"
 slug: "inegi-auto-market"
 summary:
-  es: "Pipeline que guarda cada publicación mensual del INEGI sobre ventas, producción y exportación de vehículos ligeros como una foto inmutable, para analizar marcas, estacionalidad y tipo de cambio, y medir cómo se revisan las cifras entre publicaciones. Funcionan el pipeline completo, el warehouse en BigQuery, un pronóstico que le gana a la línea base y un dashboard en Looker Studio; la ejecución programada en la nube queda en la hoja de ruta."
-  en: "Pipeline that stores every monthly INEGI release on light-vehicle sales, production, and exports as an immutable snapshot, to analyze brands, seasonality, and the exchange rate, and to measure how figures get revised between releases. The full pipeline, the BigQuery warehouse, a forecast that beats the baseline, and a Looker Studio dashboard are live; scheduled cloud runs are on the roadmap."
-tools: ["Python", "pandas", "statsmodels", "SQL", "BigQuery", "Cloud Storage", "DuckDB", "Looker Studio", "pytest", "GitHub Actions"]
+  es: "Pipeline que guarda cada publicación mensual del INEGI sobre ventas, producción y exportación de vehículos ligeros como una foto inmutable, para analizar marcas, estacionalidad y tipo de cambio, y medir cómo se revisan las cifras entre publicaciones. Funcionan el pipeline completo, el warehouse en BigQuery, un pronóstico que le gana a la línea base y un dashboard en Looker Studio, con ejecución diaria en Cloud Run."
+  en: "Pipeline that stores every monthly INEGI release on light-vehicle sales, production, and exports as an immutable snapshot, to analyze brands, seasonality, and the exchange rate, and to measure how figures get revised between releases. The full pipeline, the BigQuery warehouse, a forecast that beats the baseline, and a Looker Studio dashboard are live, with a daily run on Cloud Run."
+tools: ["Python", "pandas", "statsmodels", "SQL", "BigQuery", "Cloud Storage", "DuckDB", "Looker Studio", "Cloud Run", "Terraform", "Docker", "pytest", "GitHub Actions"]
 repo_url: "https://github.com/eddieisoffline/inegi-auto-market"
-featured: false
+featured: true
 date: "2026-10-14"
 ---
 
@@ -34,7 +34,7 @@ Esta página solo describe lo que ya se ejecutó con datos reales.
 | Warehouse en BigQuery y marts | Hecho |
 | Pronóstico con backtesting contra baseline | Hecho |
 | Dashboard en Looker Studio | Hecho |
-| Ejecución programada en Google Cloud | En la hoja de ruta |
+| Ejecución programada en Google Cloud | Hecho |
 
 ## Arquitectura
 
@@ -70,7 +70,8 @@ Cada publicación se guarda tal como llegó, con un manifiesto que incluye el sh
 - **Comparación entre publicaciones:** el comando `diff` compara dos fotos al grano de marca y modelo normalizado y clasifica cada cambio como mes nuevo, reclasificación (las unidades se mueven sin cambiar el total), revisión real (cambia el total) o cambio de estatus. Entre septiembre y octubre de 2026 encuentra la reclasificación de BMW, una sola revisión real en toda la historia (−1 unidad) y, en híbridos, 74 unidades que pasaron de híbridas a plug-in en 23 estados sin cambiar el total. Tarda menos de 3 segundos.
 - **Warehouse y marts:** el modelo analítico está escrito en SQL de BigQuery (tablas externas, hechos particionados por mes, dimensiones y 15 vistas para el dashboard). Está aplicado en BigQuery sobre el lake en Cloud Storage, con los hechos particionados por mes. El mismo SQL también se traduce con sqlglot y corre en DuckDB sobre el lake local, lo que permitió verificarlo con datos reales antes de subirlo: en las dos versiones, los marts reproducen las cifras oficiales y dan exactamente lo mismo. La dimensión de marcas une a JETOUR y Jetour Soueast en una sola serie.
 - **Pronóstico con backtesting:** cuatro modelos (ingenuo estacional como línea base obligatoria, ETS, SARIMA y SARIMAX con el tipo de cambio rezagado 6 meses) se evalúan con origen móvil: cada pronóstico usa solo los datos que existían en su origen, sobre los 45 meses de 2023 a septiembre de 2026. La caída de marzo a junio de 2020 se trata de forma explícita y se mide su efecto.
-- **Pruebas sin red:** 239 pruebas corren en GitHub Actions en cada push. Usan fixtures de 71 KB recortados de las publicaciones reales, sin cambiar ningún valor. Los fixtures incluyen a propósito los casos difíciles: claves duplicadas, correcciones negativas, una marca que cambia de nombre y la reclasificación de BMW. El servidor del INEGI se simula, incluidos 403, cortes de red, descargas incompletas y réplicas con cabeceras distintas.
+- **Ejecución diaria en Google Cloud:** un Cloud Run Job, disparado cada día por Cloud Scheduler, pregunta al INEGI si hay algo nuevo y, si lo hay, corre el ciclo completo sobre el lake en Cloud Storage y refresca BigQuery. Desde la nube, los 4 zips llegaron idénticos byte a byte a los descargados a mano, y el ciclo completo de la publicación de octubre tardó 7 min 27 s. La última publicación procesada se registra solo al terminar: cuando una ejecución falló a mitad del ciclo, la siguiente la retomó sin volver a descargar. La infraestructura está en Terraform, con cuentas de servicio de mínimo privilegio, los tokens en Secret Manager, una alerta por correo cuando una ejecución falla y despliegue por SHA desde GitHub Actions con Workload Identity Federation, sin llaves guardadas.
+- **Pruebas sin red:** 247 pruebas corren en GitHub Actions en cada push. Usan fixtures de 71 KB recortados de las publicaciones reales, sin cambiar ningún valor. Los fixtures incluyen a propósito los casos difíciles: claves duplicadas, correcciones negativas, una marca que cambia de nombre y la reclasificación de BMW. El servidor del INEGI se simula, incluidos 403, cortes de red, descargas incompletas y réplicas con cabeceras distintas.
 
 ## Hallazgos sobre la fuente
 
@@ -107,7 +108,7 @@ Con la publicación de octubre de 2026 (2005-01 a 2026-09).
 
 ## Stack
 
-Hoy: Python (pandas, pyarrow, statsmodels), Parquet, APIs del INEGI y de Banxico, SQL en BigQuery (también en DuckDB con sqlglot), Cloud Storage, Looker Studio, pytest, ruff, GitHub Actions. Hoja de ruta: Cloud Run Jobs, Cloud Scheduler y Terraform.
+Hoy: Python (pandas, pyarrow, statsmodels), Parquet, APIs del INEGI y de Banxico, SQL en BigQuery (también en DuckDB con sqlglot), Cloud Storage, Looker Studio, Cloud Run Jobs, Cloud Scheduler, Secret Manager, Terraform, Docker, pytest, ruff, GitHub Actions.
 
 ## Datos
 
@@ -138,7 +139,7 @@ This page only describes what has actually run on real data.
 | BigQuery warehouse and marts | Done |
 | Forecast with backtesting against a baseline | Done |
 | Looker Studio dashboard | Done |
-| Scheduled runs on Google Cloud | On the roadmap |
+| Scheduled runs on Google Cloud | Done |
 
 ## Architecture
 
@@ -174,7 +175,8 @@ Each release is stored exactly as it arrived, with a manifest that includes the 
 - **Comparison between releases:** the `diff` command compares two snapshots at the brand and normalized-model grain and classifies each change as a new month, a reclassification (units move without changing the total), a real revision (the total changes), or a status change. Between September and October 2026 it finds the BMW reclassification, a single real revision in the whole history (−1 unit) and, for hybrids, 74 units moved from hybrid to plug-in across 23 states with no change in the total. It takes under 3 seconds.
 - **Warehouse and marts:** the analytical model is written in BigQuery SQL (external tables, month-partitioned facts, dimensions, and 15 views for the dashboard). It is deployed on BigQuery over the lake in Cloud Storage, with facts partitioned by month. The same SQL is also translated with sqlglot and runs on DuckDB over the local lake, which made it possible to verify it with real data before uploading: in both versions the marts reproduce the official figures and match exactly. The brand dimension joins JETOUR and Jetour Soueast into a single series.
 - **Forecast with backtesting:** four models (seasonal naive as the mandatory baseline, ETS, SARIMA, and SARIMAX with the exchange rate lagged 6 months) are evaluated with a rolling origin: every forecast only uses data that existed at its origin, over the 45 months from 2023 to September 2026. The March–June 2020 collapse is handled explicitly and its effect is measured.
-- **Offline tests:** 239 tests run on GitHub Actions on every push. They use 71 KB of fixtures cut from the real releases without changing any value. The fixtures deliberately include the hard cases: duplicate keys, negative corrections, a brand rename, and the BMW reclassification. INEGI's server is simulated, including 403s, network drops, incomplete downloads, and replicas with different headers.
+- **Daily run on Google Cloud:** a Cloud Run Job, triggered every day by Cloud Scheduler, asks INEGI whether anything is new and, if so, runs the full cycle over the lake in Cloud Storage and refreshes BigQuery. From the cloud, the 4 zips arrived byte-for-byte identical to the manual downloads, and the full cycle for the October release took 7 min 27 s. The last processed release is recorded only at the end: when a run failed mid-cycle, the next one picked it up without downloading again. The infrastructure is in Terraform, with least-privilege service accounts, tokens in Secret Manager, an email alert when a run fails, and deploy by SHA from GitHub Actions through Workload Identity Federation, with no stored keys.
+- **Offline tests:** 247 tests run on GitHub Actions on every push. They use 71 KB of fixtures cut from the real releases without changing any value. The fixtures deliberately include the hard cases: duplicate keys, negative corrections, a brand rename, and the BMW reclassification. INEGI's server is simulated, including 403s, network drops, incomplete downloads, and replicas with different headers.
 
 ## Findings about the source
 
@@ -211,7 +213,7 @@ Using the October 2026 release (2005-01 to 2026-09).
 
 ## Stack
 
-Today: Python (pandas, pyarrow, statsmodels), Parquet, INEGI and Banxico APIs, SQL on BigQuery (also on DuckDB with sqlglot), Cloud Storage, Looker Studio, pytest, ruff, GitHub Actions. Roadmap: Cloud Run Jobs, Cloud Scheduler, and Terraform.
+Today: Python (pandas, pyarrow, statsmodels), Parquet, INEGI and Banxico APIs, SQL on BigQuery (also on DuckDB with sqlglot), Cloud Storage, Looker Studio, Cloud Run Jobs, Cloud Scheduler, Secret Manager, Terraform, Docker, pytest, ruff, and GitHub Actions.
 
 ## Data
 

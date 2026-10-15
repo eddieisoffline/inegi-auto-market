@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "inegi-auto-market"
-version = "0.1.0"
+version = "0.2.0"
 description = "Mercado automotriz de México con datos del INEGI (RAIAVL) y Banxico: ingesta de publicaciones, capa curated con contratos, conciliación, diff entre publicaciones, warehouse en BigQuery y pronóstico"
 readme = "README.md"
 license = { text = "MIT" }

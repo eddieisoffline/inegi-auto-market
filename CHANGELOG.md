@@ -4,7 +4,7 @@ Los cambios relevantes del proyecto se documentan aquí. El formato sigue
 [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y el proyecto usa
 [versionado semántico](https://semver.org/lang/es/).
 
-## [Sin publicar]
+## [0.2.0] - 2026-10-14
 
 ### Añadido
 
@@ -21,6 +21,11 @@ Los cambios relevantes del proyecto se documentan aquí. El formato sigue
 - **CI/CD**: validación de Terraform en cada push y despliegue por SHA desde GitHub
   Actions.
 - **Documentación**: [despliegue.md](docs/despliegue.md).
+
+### Corregido
+
+- Un token guardado con BOM (U+FEFF) al inicio, como el que deja PowerShell al pasar
+  texto por tubería a `gcloud`, ya no rompe las peticiones a las APIs.
 
 ## [0.1.0] - 2026-10-14
 
@@ -56,3 +61,6 @@ Primera versión.
   CI con `ruff` y `pytest` en GitHub Actions.
 - **Documentación**: arquitectura, operación, reglas de curated, contratos, warehouse y
   pronóstico; licencia MIT; comando `inegi-market`.
+
+[0.2.0]: https://github.com/eddieisoffline/inegi-auto-market/releases/tag/v0.2.0
+[0.1.0]: https://github.com/eddieisoffline/inegi-auto-market/releases/tag/v0.1.0

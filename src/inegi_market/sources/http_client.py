@@ -15,7 +15,7 @@ from typing import BinaryIO, Protocol
 
 log = logging.getLogger(__name__)
 
-USER_AGENT = "inegi-auto-market/0.1 (+https://github.com/eddieisoffline/inegi-auto-market)"
+USER_AGENT = "inegi-auto-market/0.2 (+https://github.com/eddieisoffline/inegi-auto-market)"
 TIMEOUT_SECONDS = 60.0
 RETRIES = 3
 BACKOFF_SECONDS = 5.0

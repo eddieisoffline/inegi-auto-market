@@ -171,6 +171,33 @@ gcloud run jobs execute inegi-market --region us-central1 --wait
 Sin `state/pipeline.json`, la ejecución procesa la publicación más reciente. La segunda
 ejecución debe terminar con "run: sin publicación pendiente".
 
+## Resultados medidos
+
+Puesta en marcha con la publicación del 2026-10-07 (14 de octubre de 2026):
+
+- **Descarga desde Cloud Run:** el servidor del INEGI respondió desde la nube y los 4
+  zips llegaron idénticos a los ya guardados en el bucket (mismo sha256).
+- **Ciclo completo:** 7 min 27 s de ejecución, con 2 vCPU y 4 GiB:
+
+  | Paso | Duración |
+  | --- | --- |
+  | `curate` | 24 s |
+  | `reconcile` | 8 s |
+  | `fx` | 1 s |
+  | `diff` | 16 s |
+  | `forecast` | 237 s |
+  | `warehouse` (48 sentencias en BigQuery) | 96 s |
+
+  El resto es el arranque del contenedor y la consulta al INEGI.
+- **Recuperación:** las dos primeras ejecuciones fallaron en `reconcile` porque los tokens
+  se guardaron con BOM. La tercera retomó la publicación pendiente sin volver a
+  descargar y escribió `state/pipeline.json`.
+- **Alerta:** cada ejecución fallida envió el correo.
+- **Deploy por SHA:** un push a `main` construyó la imagen (225 MB comprimida), la subió y
+  actualizó el job desde GitHub Actions.
+
+El costo se revisa en la facturación del proyecto, que ya vigila un presupuesto.
+
 ## Operación
 
 | Tarea | Comando |
