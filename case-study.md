@@ -4,9 +4,9 @@ title:
   en: "Mexico's Auto Market with Live INEGI Data"
 slug: "inegi-auto-market"
 summary:
-  es: "Pipeline que guarda cada publicación mensual del INEGI sobre ventas, producción y exportación de vehículos ligeros como una foto inmutable, para analizar marcas, estacionalidad y tipo de cambio, y medir cómo se revisan las cifras entre publicaciones. Funcionan el pipeline completo, el warehouse en BigQuery, un pronóstico que le gana a la línea base y un dashboard en Looker Studio, con ejecución diaria en Cloud Run."
-  en: "Pipeline that stores every monthly INEGI release on light-vehicle sales, production, and exports as an immutable snapshot, to analyze brands, seasonality, and the exchange rate, and to measure how figures get revised between releases. The full pipeline, the BigQuery warehouse, a forecast that beats the baseline, and a Looker Studio dashboard are live, with a daily run on Cloud Run."
-tools: ["Python", "pandas", "statsmodels", "SQL", "BigQuery", "Cloud Storage", "DuckDB", "Looker Studio", "Cloud Run", "Terraform", "Docker", "pytest", "GitHub Actions"]
+  es: "Guarda cada publicación mensual del INEGI sobre vehículos ligeros como una foto inmutable y mide qué cambia entre una y otra. Corre a diario en Cloud Run y alimenta BigQuery, un pronóstico y un dashboard en Looker Studio."
+  en: "Stores every monthly INEGI release on light vehicles as an immutable snapshot and measures what changes between them. It runs daily on Cloud Run and feeds BigQuery, a forecast, and a Looker Studio dashboard."
+tools: ["Python", "pandas", "statsmodels", "SQL", "BigQuery", "Looker Studio", "Cloud Storage", "DuckDB", "Cloud Run", "Terraform", "Docker", "pytest", "GitHub Actions"]
 repo_url: "https://github.com/eddieisoffline/inegi-auto-market"
 cover_image: "https://raw.githubusercontent.com/eddieisoffline/inegi-auto-market/main/docs/img/dashboard-mercado.png"
 featured: true
@@ -109,7 +109,7 @@ Con la publicación de octubre de 2026 (2005-01 a 2026-09).
 
 ## Stack
 
-Hoy: Python (pandas, pyarrow, statsmodels), Parquet, APIs del INEGI y de Banxico, SQL en BigQuery (también en DuckDB con sqlglot), Cloud Storage, Looker Studio, Cloud Run Jobs, Cloud Scheduler, Secret Manager, Terraform, Docker, pytest, ruff, GitHub Actions.
+Python (pandas, pyarrow, statsmodels), Parquet, APIs del INEGI y de Banxico, SQL en BigQuery (también en DuckDB con sqlglot), Cloud Storage, Looker Studio, Cloud Run Jobs, Cloud Scheduler, Secret Manager, Terraform, Docker, pytest, ruff, GitHub Actions.
 
 ## Datos
 
@@ -214,7 +214,7 @@ Using the October 2026 release (2005-01 to 2026-09).
 
 ## Stack
 
-Today: Python (pandas, pyarrow, statsmodels), Parquet, INEGI and Banxico APIs, SQL on BigQuery (also on DuckDB with sqlglot), Cloud Storage, Looker Studio, Cloud Run Jobs, Cloud Scheduler, Secret Manager, Terraform, Docker, pytest, ruff, and GitHub Actions.
+Python (pandas, pyarrow, statsmodels), Parquet, INEGI and Banxico APIs, SQL on BigQuery (also on DuckDB with sqlglot), Cloud Storage, Looker Studio, Cloud Run Jobs, Cloud Scheduler, Secret Manager, Terraform, Docker, pytest, ruff, and GitHub Actions.
 
 ## Data
 
