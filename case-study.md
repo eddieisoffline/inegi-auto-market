@@ -8,6 +8,7 @@ summary:
   en: "Pipeline that stores every monthly INEGI release on light-vehicle sales, production, and exports as an immutable snapshot, to analyze brands, seasonality, and the exchange rate, and to measure how figures get revised between releases. The full pipeline, the BigQuery warehouse, a forecast that beats the baseline, and a Looker Studio dashboard are live, with a daily run on Cloud Run."
 tools: ["Python", "pandas", "statsmodels", "SQL", "BigQuery", "Cloud Storage", "DuckDB", "Looker Studio", "Cloud Run", "Terraform", "Docker", "pytest", "GitHub Actions"]
 repo_url: "https://github.com/eddieisoffline/inegi-auto-market"
+cover_image: "https://raw.githubusercontent.com/eddieisoffline/inegi-auto-market/main/docs/img/dashboard-mercado.png"
 featured: true
 date: "2026-10-14"
 ---
