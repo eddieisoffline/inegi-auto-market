@@ -34,8 +34,8 @@ class FakeApi:
         self.routes = {k: list(v) for k, v in routes.items()}
         self.calls = []
 
-    def head(self, url, headers):
-        raise AssertionError("las APIs no usan HEAD")
+    def probe(self, url, headers):
+        raise AssertionError("las APIs no usan probe")
 
     def get(self, url, headers, dest):
         self.calls.append((url, dict(headers)))

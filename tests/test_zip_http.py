@@ -2,6 +2,7 @@ import email.message
 import io
 import json
 import logging
+import ssl
 import urllib.error
 import zipfile
 from datetime import date, datetime, timezone
@@ -11,7 +12,13 @@ from conftest import PRODUCTS, build_zip, fixture_dir
 
 from inegi_market.cli import main
 from inegi_market.sources import http_client
-from inegi_market.sources.http_client import USER_AGENT, HttpResponse, UrllibClient
+from inegi_market.sources.http_client import (
+    USER_AGENT,
+    HttpResponse,
+    TlsVerificationError,
+    UrllibClient,
+    format_chain,
+)
 from inegi_market.sources.zip_http import ZIP_URLS, check, fetch, load_state
 from inegi_market.storage import LocalStorage
 
@@ -66,15 +73,19 @@ class FakeInegi:
             raise item
         return item
 
-    def head(self, url, headers):
-        self.calls.append(("HEAD", url, dict(headers)))
-        queued = self._queued("HEAD", url)
+    def probe(self, url, headers):
+        """GET de 1 byte: 206 con las cabeceras del archivo, como el servidor real."""
+        self.calls.append(("PROBE", url, dict(headers)))
+        queued = self._queued("PROBE", url)
         if queued is not None:
             return queued
         etag = self.files[url][2]
         if self.honor_conditional and self.validators and headers.get("If-None-Match") == etag:
             return HttpResponse(304, {"etag": etag})
-        return HttpResponse(200, self._headers(url))
+        headers = self._headers(url)
+        size = headers["content-length"]
+        headers.update({"content-length": "1", "content-range": f"bytes 0-0/{size}"})
+        return HttpResponse(206, headers)
 
     def get(self, url, headers, dest):
         self.calls.append(("GET", url, dict(headers)))
@@ -135,7 +146,7 @@ def test_check_without_state_reports_new_and_writes_nothing(lake):
     results = check(server, lake, sleep=Sleeps())
     assert {r.status for r in results} == {"new"}
     assert all(r.detail.startswith("sin estado previo") for r in results)
-    assert [m for m, _, _ in server.calls] == ["HEAD"] * 4
+    assert [m for m, _, _ in server.calls] == ["PROBE"] * 4
     assert lake.list("") == []
 
 
@@ -207,6 +218,17 @@ def test_etag_change_downloads_the_new_publication(lake):
     assert len(manifests(lake)) == 8
     assert load_state(lake)["venta"]["etag"] == OCT[1]
     assert load_state(lake)["venta"]["publication_date"] == "2026-10-07"
+
+
+def test_server_that_ignores_the_range_is_compared_by_headers(lake):
+    server = FakeInegi()
+    server.publish("2026-09-09", SEP)
+    run_fetch(server, lake)
+    full = HttpResponse(200, {"last-modified": SEP[0], "etag": SEP[1], "content-length": "999"})
+    server.script("PROBE", "venta", full)
+
+    checked = {r.product: r for r in check(server, lake, sleep=Sleeps())}
+    assert (checked["venta"].status, checked["venta"].detail) == ("unchanged", "mismas cabeceras")
 
 
 def test_another_server_replica_is_not_a_new_publication(lake):
@@ -349,19 +371,32 @@ def test_zip_of_another_product_is_rejected(lake):
     assert "se esperaba un zip de 'venta'" in result.detail
 
 
-def test_head_failure_reports_error_and_downloads_nothing(lake):
+def test_probe_failure_reports_error_and_downloads_nothing(lake):
     server = FakeInegi()
     server.publish("2026-09-09", SEP)
-    server.script("HEAD", "venta", HttpResponse(403))
+    server.script("PROBE", "venta", HttpResponse(403))
     checked = {r.product: r for r in check(server, lake, sleep=Sleeps())}
     assert checked["venta"].status == "error"
-    assert "HTTP 403" in checked["venta"].detail
+    assert "HTTP 403 en GET de 1 byte" in checked["venta"].detail
 
-    server.script("HEAD", "venta", HttpResponse(403))
+    server.script("PROBE", "venta", HttpResponse(403))
     results = run_fetch(server, lake)
     assert results["venta"].status == "failed"
     assert "no se sabe si hay publicación nueva" in results["venta"].detail
     assert ZIP_URLS["venta"] not in server.gets()
+
+
+def test_certificate_failure_is_retried_and_reports_the_chain(lake):
+    server = FakeInegi()
+    server.publish("2026-09-09", SEP, products=["venta"])
+    chain = "el servidor mandó 1 certificado(s): www.inegi.org.mx (emitido por Sectigo OV R36)"
+    error = TlsVerificationError(f"certificate verify failed; {chain}")
+    server.script("PROBE", "venta", *[error] * 3)
+    sleeps = Sleeps()
+    (checked,) = check(server, lake, sleep=sleeps, urls={"venta": ZIP_URLS["venta"]})
+    assert checked.status == "error"
+    assert chain in checked.detail and "tras 3 intentos" in checked.detail
+    assert sleeps == [5.0, 10.0]
 
 
 # --- CLI ------------------------------------------------------------------------
@@ -401,7 +436,7 @@ def test_cli_check_exits_1_when_the_server_cannot_be_queried(env_lake, monkeypat
     monkeypatch.setattr(http_client.time, "sleep", lambda s: None)
     server = FakeInegi()
     server.publish("2026-09-09", SEP)
-    server.script("HEAD", "venta", *[OSError("sin red")] * 3)
+    server.script("PROBE", "venta", *[OSError("sin red")] * 3)
     with pytest.raises(SystemExit) as exc:
         main(["check"], client=server)
     assert exc.value.code == 1
@@ -429,14 +464,23 @@ def fake_urlopen(outcome, seen):
     return urlopen
 
 
-def test_urllib_head_sends_user_agent_and_lowercases_headers(monkeypatch):
+class UnreadableResponse(FakeUrlopenResponse):
+    def read(self, *args):
+        raise AssertionError("probe no debe leer el cuerpo")
+
+
+def test_urllib_probe_asks_for_one_byte_without_reading_the_body(monkeypatch):
     seen = []
-    response = FakeUrlopenResponse(b"", headers={"ETag": '"x"', "Last-Modified": "hoy"})
+    headers = {"ETag": '"x"', "Last-Modified": "hoy", "Content-Range": "bytes 0-0/100"}
+    response = UnreadableResponse(b"x" * 100, status=206, headers=headers)
     monkeypatch.setattr(http_client.urllib.request, "urlopen", fake_urlopen(response, seen))
-    result = UrllibClient(timeout=7).head("https://example.org/a.zip", {"If-None-Match": '"x"'})
-    assert result == HttpResponse(200, {"etag": '"x"', "last-modified": "hoy"})
+    result = UrllibClient(timeout=7).probe("https://example.org/a.zip", {"If-None-Match": '"x"'})
+    assert result == HttpResponse(
+        206, {"etag": '"x"', "last-modified": "hoy", "content-range": "bytes 0-0/100"}
+    )
     request, timeout = seen[0]
-    assert request.get_method() == "HEAD" and timeout == 7
+    assert request.get_method() == "GET" and timeout == 7
+    assert request.get_header("Range") == "bytes=0-0"
     assert request.get_header("User-agent") == USER_AGENT
     assert request.get_header("If-none-match") == '"x"'
 
@@ -453,12 +497,78 @@ def test_urllib_http_errors_become_responses(monkeypatch):
     headers = email.message.Message()
     error = urllib.error.HTTPError("https://example.org/a.zip", 403, "Forbidden", headers, None)
     monkeypatch.setattr(http_client.urllib.request, "urlopen", fake_urlopen(error, []))
-    assert UrllibClient().head("https://example.org/a.zip", {}).status == 403
+    assert UrllibClient().probe("https://example.org/a.zip", {}).status == 403
     assert UrllibClient().get("https://example.org/a.zip", {}, io.BytesIO()).status == 403
 
 
 def test_urllib_network_errors_are_raised_as_oserror(monkeypatch):
     error = urllib.error.URLError("sin DNS")
     monkeypatch.setattr(http_client.urllib.request, "urlopen", fake_urlopen(error, []))
-    with pytest.raises(OSError):
-        UrllibClient().head("https://example.org/a.zip", {})
+    monkeypatch.setattr(http_client, "unverified_chain", lambda *a: pytest.fail("no es TLS"))
+    with pytest.raises(OSError) as exc:
+        UrllibClient().probe("https://example.org/a.zip", {})
+    assert not isinstance(exc.value, TlsVerificationError)
+
+
+# Lo que reportó el job el 2026-11-04 y la forma en que `get_info()` describe un certificado.
+VERIFY_FAILED = (
+    "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: "
+    "unable to get local issuer certificate (_ssl.c:1010)"
+)
+OV_R36 = "Sectigo Public Server Authentication CA OV R36"
+
+
+def cert(subject_cn, issuer_cn):
+    return {
+        "subject": ((("countryName", "MX"),), (("commonName", subject_cn),)),
+        "issuer": ((("organizationName", "Sectigo Limited"),), (("commonName", issuer_cn),)),
+    }
+
+
+def tls_failure():
+    reason = ssl.SSLCertVerificationError(1, VERIFY_FAILED)
+    return urllib.error.URLError(reason)
+
+
+def test_certificate_failure_reports_the_chain_the_server_sent(monkeypatch):
+    seen = []
+
+    def chain(host, port, timeout):
+        seen.append((host, port, timeout))
+        return [cert("www.inegi.org.mx", OV_R36)]
+
+    monkeypatch.setattr(http_client.urllib.request, "urlopen", fake_urlopen(tls_failure(), []))
+    monkeypatch.setattr(http_client, "unverified_chain", chain)
+    with pytest.raises(TlsVerificationError) as exc:
+        UrllibClient(timeout=7).probe(ZIP_URLS["venta"], {})
+    assert "unable to get local issuer certificate" in str(exc.value)
+    assert (
+        f"el servidor mandó 1 certificado(s): www.inegi.org.mx (emitido por {OV_R36})"
+        in str(exc.value)
+    )
+    assert seen == [("www.inegi.org.mx", 443, 7)]
+    assert isinstance(exc.value, OSError)  # `with_retries` lo trata como error de red
+
+
+def test_unreadable_chain_does_not_hide_the_certificate_error(monkeypatch):
+    def chain(host, port, timeout):
+        raise ConnectionResetError("reset")
+
+    monkeypatch.setattr(http_client.urllib.request, "urlopen", fake_urlopen(tls_failure(), []))
+    monkeypatch.setattr(http_client, "unverified_chain", chain)
+    with pytest.raises(TlsVerificationError) as exc:
+        UrllibClient().get(ZIP_URLS["venta"], {}, io.BytesIO())
+    assert "unable to get local issuer certificate" in str(exc.value)
+    assert "no se pudo leer la cadena (ConnectionResetError('reset'))" in str(exc.value)
+
+
+def test_format_chain_lists_each_certificate_in_order():
+    full = [
+        cert("www.inegi.org.mx", OV_R36),
+        cert(OV_R36, "Sectigo Public Server Authentication Root R46"),
+    ]
+    assert format_chain(full) == (
+        f"el servidor mandó 2 certificado(s): www.inegi.org.mx (emitido por {OV_R36}) -> "
+        f"{OV_R36} (emitido por Sectigo Public Server Authentication Root R46)"
+    )
+    assert format_chain([]) == "el servidor no mandó certificados"

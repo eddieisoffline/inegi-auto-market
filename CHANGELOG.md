@@ -4,6 +4,20 @@ Los cambios relevantes del proyecto se documentan aquí. El formato sigue
 [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y el proyecto usa
 [versionado semántico](https://semver.org/lang/es/).
 
+## [Sin publicar]
+
+### Corregido
+
+- **Detección de publicaciones** (`check`, `fetch`, `run`): un GET de un solo byte
+  (`Range: bytes=0-0`) reemplaza al HEAD. El balanceador del INEGI contesta los HEAD con
+  una página HTML sin `Last-Modified` ni `ETag`, y con eso cada ejecución descargaba los 4
+  zips completos (unos 65 MB) para descartarlos por sha256.
+
+### Añadido
+
+- Si falla la verificación del certificado TLS, el error incluye la cadena que mandó el
+  servidor; "el servidor mandó 1 certificado(s)" indica que faltó el intermedio.
+
 ## [0.2.0] - 2026-10-14
 
 ### Añadido
@@ -62,5 +76,6 @@ Primera versión.
 - **Documentación**: arquitectura, operación, reglas de curated, contratos, warehouse y
   pronóstico; licencia MIT; comando `inegi-market`.
 
+[Sin publicar]: https://github.com/eddieisoffline/inegi-auto-market/compare/v0.2.0...HEAD
 [0.2.0]: https://github.com/eddieisoffline/inegi-auto-market/releases/tag/v0.2.0
 [0.1.0]: https://github.com/eddieisoffline/inegi-auto-market/releases/tag/v0.1.0

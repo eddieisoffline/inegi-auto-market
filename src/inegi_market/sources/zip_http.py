@@ -1,9 +1,13 @@
 """Fuente HTTP: los 4 zips del RAIAVL que el INEGI publica con URL fija.
 
-La URL no cambia entre publicaciones, así que una publicación nueva se detecta con
-un HEAD, sin descargar nada, por la cabecera `Last-Modified`. El servidor del INEGI
-responde desde varias réplicas y cada una da su propio `Last-Modified` (difieren unos
-segundos) y su propio `ETag` para el mismo archivo (medido el 2026-10-08). Por eso:
+La URL no cambia entre publicaciones, así que una publicación nueva se detecta por la
+cabecera `Last-Modified`, con un GET de un solo byte (`Range: bytes=0-0`) que no
+descarga el archivo. No se usa HEAD: desde el 2026-10-17 el balanceador del INEGI
+contesta los HEAD con una página HTML sin `Last-Modified` ni `ETag`, mientras que el
+GET de un byte trae las cabeceras reales del zip (206, medido el 2026-11-04). El
+servidor responde desde varias réplicas y cada una da su propio `Last-Modified`
+(difieren unos segundos) y su propio `ETag` para el mismo archivo (medido el
+2026-10-08). Por eso:
 - es publicación nueva solo si `Last-Modified` se mueve más de
   `LAST_MODIFIED_TOLERANCE` respecto a lo guardado;
 - el `ETag` se usa para la petición condicional (304) y solo decide si el servidor
@@ -125,16 +129,19 @@ def _check_one(
         conditional["If-None-Match"] = known["etag"]
     if known.get("last_modified"):
         conditional["If-Modified-Since"] = known["last_modified"]
+    what = f"GET de 1 byte {product}"
     try:
-        response = with_retries(lambda: client.head(url, conditional), f"HEAD {product}", sleep)
+        response = with_retries(lambda: client.probe(url, conditional), what, sleep)
     except DownloadError as exc:
         return CheckResult(product, url, "error", detail=str(exc))
 
     known_lm, known_etag = known.get("last_modified"), known.get("etag")
     if response.status == 304:
         return CheckResult(product, url, "unchanged", known_lm, known_etag, "304 Not Modified")
-    if response.status != 200:
-        return CheckResult(product, url, "error", detail=f"HTTP {response.status} en HEAD {url}")
+    if response.status not in (200, 206):  # 200: el servidor ignoró el rango
+        return CheckResult(
+            product, url, "error", detail=f"HTTP {response.status} en GET de 1 byte {url}"
+        )
 
     lm, etag = response.headers.get("last-modified"), response.headers.get("etag")
     if not known:
@@ -149,7 +156,7 @@ def check(
     sleep: Callable[[float], None] = default_sleep,
     urls: dict[str, str] = ZIP_URLS,
 ) -> list[CheckResult]:
-    """HEAD a cada URL y comparación con el estado guardado. No descarga ni escribe."""
+    """GET de 1 byte a cada URL y comparación con el estado guardado. No descarga ni escribe."""
     state = load_state(storage)
     results = [_check_one(p, url, state.get(p, {}), client, sleep) for p, url in urls.items()]
     for r in results:

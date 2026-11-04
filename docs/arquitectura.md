@@ -89,7 +89,9 @@ La ruta completa de cada archivo y el comando que lo escribe están en
   metadato y nunca se sobrescribe. Un zip regenerado con los mismos datos no cuenta como
   cambio (se compara el sha256 de cada archivo, no del zip); una corrección silenciosa
   detiene la ingesta.
-- **Detectar sin descargar.** Un HEAD por zip basta. Las réplicas del servidor del INEGI
+- **Detectar sin descargar.** Un GET de un byte (`Range: bytes=0-0`) por zip basta; HEAD
+  no sirve porque el balanceador del INEGI lo contesta con una página HTML sin
+  `Last-Modified` ni `ETag`. Las réplicas del servidor del INEGI
   devuelven `ETag` distintos y `Last-Modified` que difieren hasta 4 s para el mismo
   archivo, así que una publicación es nueva solo si `Last-Modified` se mueve más de 10
   minutos.

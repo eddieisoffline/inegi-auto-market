@@ -60,7 +60,7 @@ con un mensaje que dice qué hacer. Un argumento inválido termina con código 2
 | Comando | Qué hace |
 | --- | --- |
 | [`run`](#run) | Ciclo completo: descarga y, si hay una publicación pendiente, procesa hasta el warehouse |
-| [`check`](#check) | Pregunta con HEAD si el INEGI publicó algo nuevo; no descarga |
+| [`check`](#check) | Pregunta con un GET de 1 byte si el INEGI publicó algo nuevo; no descarga |
 | [`fetch`](#fetch) | Descarga e ingiere los zips que cambiaron |
 | [`ingest`](#ingest) | Guarda zips locales en `raw/` sin sobrescribir |
 | [`curate`](#curate) | `raw/` → Parquet tipado en `curated/`, con contratos de datos |
@@ -76,9 +76,11 @@ con un mensaje que dice qué hacer. Un argumento inválido termina con código 2
 inegi-market check
 ```
 
-Hace un HEAD a cada una de las 4 URLs del INEGI y compara la respuesta con
-`state/raiavl_head.json`. Cada producto queda como `new`, `unchanged` o `error`. No
-descarga ni escribe nada. Termina con código 1 si algún producto da `error`.
+Hace un GET de un solo byte (`Range: bytes=0-0`) a cada una de las 4 URLs del INEGI y
+compara las cabeceras con `state/raiavl_head.json`. No usa HEAD: el balanceador del INEGI
+lo contesta con una página HTML sin `Last-Modified` ni `ETag`. Cada producto queda como
+`new`, `unchanged` o `error`. No descarga ni escribe nada. Termina con código 1 si algún
+producto da `error`.
 
 ### fetch
 
@@ -264,6 +266,7 @@ las tablas y vistas en BigQuery.
 | Correo "inegi-market: ejecución fallida" | Una ejecución del job terminó con error | El log de la ejecución dice qué paso falló; la causa es una de las filas de esta tabla. La publicación sigue pendiente y la ejecución siguiente la retoma |
 | `run`: "descarga fallida" | `fetch` no pudo descargar un zip | Igual que la fila de `fetch`; con el lake en Cloud Storage, ingerir con `INEGI_MARKET_BACKEND=gcs` ([despliegue.md](despliegue.md#operación)) |
 | `fetch`: `failed` con HTTP 403, corte de red o "descarga incompleta" | El servidor del INEGI rechaza la red o la descarga se cortó | Descargar el zip en el navegador e ingerirlo con `inegi-market ingest --zip RUTA`, o correr `fetch` desde otra red |
+| `fetch` o `run`: "CERTIFICATE_VERIFY_FAILED" | El certificado del servidor no verificó. El mensaje trae la cadena que mandó el servidor: con un solo certificado, el servidor omitió el intermedio | Si la cadena llegó incompleta, el problema es del servidor y la ejecución siguiente retoma la publicación pendiente. Si persiste, descargar el zip en el navegador (que completa la cadena por su cuenta) e ingerirlo con `inegi-market ingest --zip RUTA` |
 | `ingest` o `fetch`: "ya hay una foto guardada con otro contenido y la misma fecha 'modified'" | El INEGI regeneró la publicación con cambios sin mover su fecha | El pipeline no sobrescribe. El mensaje lista los archivos que cambiaron; la foto guardada sigue siendo la que usa el análisis |
 | Advertencia "mismo contenido con otro empaquetado" | El zip se volvió a empaquetar (por ejemplo, con otra compresión) | Nada: no se escribe nada |
 | `curate`: "marca grande ausente … reconócela con --acknowledge-exit" | Una marca con al menos 1 % de las ventas dejó de reportar | Confirmar que la salida es real y repetir con `curate --acknowledge-exit MARCA` |

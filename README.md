@@ -123,8 +123,9 @@ La infraestructura está en Terraform ([docs/despliegue.md](docs/despliegue.md))
 - **Cada publicación es una foto inmutable,** identificada por la fecha `modified` de su
   metadato; un zip regenerado con los mismos datos no cuenta como cambio y una corrección
   silenciosa detiene la ingesta ([arquitectura](docs/arquitectura.md#principios-de-diseño)).
-- **Detectar sin descargar:** un HEAD por zip, con 10 minutos de tolerancia en
-  `Last-Modified` porque las réplicas del servidor no coinciden en sus cabeceras
+- **Detectar sin descargar:** un GET de un byte por zip (HEAD no sirve: el balanceador
+  del INEGI lo contesta con HTML), con 10 minutos de tolerancia en `Last-Modified` porque
+  las réplicas del servidor no coinciden en sus cabeceras
   ([arquitectura](docs/arquitectura.md#principios-de-diseño)).
 - **Los duplicados se suman por el nombre original del modelo:** con el nombre
   normalizado se fusionarían 113 claves que el INEGI reporta por separado, como "Tacoma"

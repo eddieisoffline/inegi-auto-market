@@ -43,7 +43,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--source", choices=["file"], default="file", help="origen de los zips (por ahora: file)"
     )
 
-    sub.add_parser("check", help="pregunta con HEAD si el INEGI publicó algo nuevo; no descarga")
+    sub.add_parser(
+        "check", help="pregunta con un GET de 1 byte si el INEGI publicó algo nuevo; no descarga"
+    )
     sub.add_parser("fetch", help="descarga e ingiere los zips que cambiaron")
 
     p_curate = sub.add_parser("curate", help="raw -> curated: Parquet tipado de cada foto de raw")
