@@ -44,7 +44,9 @@ from .http_client import (
 
 log = logging.getLogger(__name__)
 
-BASE_URL = "https://www.inegi.org.mx/contenidos/datosprimarios/iavl/datosabiertos/"
+# Verificado el 2026-11-11: INEGI migró el programa y los zips a esta ruta.
+# La ruta anterior sigue respondiendo 200/304 con la publicación de octubre.
+BASE_URL = "https://www.inegi.org.mx/contenidos/investigacion/datosprimarios/raiavl/datosabiertos/"
 ZIP_URLS = {product: BASE_URL + ZIP_NAME.format(product=product) for product in PRODUCTS}
 STATE_PATH = "state/raiavl_head.json"
 # Las réplicas del INEGI difirieron hasta 4 s en el Last-Modified de una misma publicación;

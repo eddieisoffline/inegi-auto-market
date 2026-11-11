@@ -8,6 +8,11 @@ Los cambios relevantes del proyecto se documentan aquí. El formato sigue
 
 ### Corregido
 
+- **Rutas de descarga del INEGI**: los cuatro zips ahora se consultan en
+  `/contenidos/investigacion/datosprimarios/raiavl/datosabiertos/`. Verificado el
+  2026-11-11: las URLs anteriores seguían sirviendo la publicación del 2026-10-07,
+  mientras las nuevas ya contenían la del 2026-11-09, con datos hasta octubre.
+  Esto hacía que el job terminara correctamente sin detectar la publicación nueva.
 - **Detección de publicaciones** (`check`, `fetch`, `run`): un GET de un solo byte
   (`Range: bytes=0-0`) reemplaza al HEAD. El balanceador del INEGI contesta los HEAD con
   una página HTML sin `Last-Modified` ni `ETag`, y con eso cada ejecución descargaba los 4

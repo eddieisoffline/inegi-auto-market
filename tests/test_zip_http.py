@@ -131,7 +131,7 @@ def manifests(lake):
 
 
 def test_urls_are_the_fixed_inegi_urls():
-    base = "https://www.inegi.org.mx/contenidos/datosprimarios/iavl/datosabiertos/"
+    base = "https://www.inegi.org.mx/contenidos/investigacion/datosprimarios/raiavl/datosabiertos/"
     assert ZIP_URLS == {
         "venta": base + "conjunto_de_datos_raiavl_mensual_venta_csv.zip",
         "produccion": base + "conjunto_de_datos_raiavl_mensual_produccion_csv.zip",

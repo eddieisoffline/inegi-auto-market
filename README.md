@@ -246,7 +246,7 @@ producidos y 277,369 exportados.
 ## Fuentes y atribución
 
 **Fuente: INEGI, Registro Administrativo de la Industria Automotriz de Vehículos
-Ligeros (RAIAVL).** Datos abiertos en <https://www.inegi.org.mx/datosprimarios/iavl/>,
+Ligeros (RAIAVL).** Datos abiertos en <https://www.inegi.org.mx/investigacion/datosprimarios/raiavl/>,
 usados bajo los [términos de libre uso del INEGI](https://www.inegi.org.mx/inegi/terminos.html).
 Totales nacionales para conciliar: Banco de Indicadores del INEGI.
 **Tipo de cambio: Banco de México, Sistema de Información Económica (SIE), serie
